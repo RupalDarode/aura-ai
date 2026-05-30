@@ -2,5 +2,3 @@ streamlit
 requests
 Pillow
 PyPDF2
-SpeechRecognition
-gtts
