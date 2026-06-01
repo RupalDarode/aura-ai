@@ -4,468 +4,687 @@ from io import BytesIO
 from PIL import Image
 import urllib.parse
 import base64
-import json
-from datetime import datetime
 import PyPDF2
 import io
 
-st.set_page_config(page_title="Aura AI", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="Aura AI", page_icon="✦", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
-.stApp { background-color: #0b1120; color: white; }
-.main-title { text-align: center; font-size: 50px; font-weight: bold; color: #00ffff; margin-bottom: 0; }
-.subtitle { text-align: center; color: #bbbbbb; margin-bottom: 20px; font-size: 14px; }
-.feature-badge {
-    display: inline-block; background: #1a2a4a; border: 1px solid #00ffff33;
-    border-radius: 20px; padding: 4px 12px; font-size: 12px; margin: 2px;
+/* ── RESET & BASE ── */
+* { box-sizing: border-box; }
+html, body, .stApp { background: #07070f !important; }
+.stApp { font-family: 'DM Sans', sans-serif; }
+[data-testid="stSidebar"] {
+    background: #0c0c18 !important;
+    border-right: 1px solid rgba(255,255,255,0.05) !important;
 }
-.stChatMessage { background-color: #111827 !important; border-radius: 10px; }
-div[data-testid="stSidebar"] { background-color: #0d1b2e; }
-.stSelectbox > div { background-color: #1a2a4a !important; }
+[data-testid="stSidebar"] > div { padding-top: 0 !important; }
+.stChatMessage { background: transparent !important; border: none !important; }
+.stChatMessage [data-testid="stChatMessageContent"] { background: transparent !important; }
+div[data-testid="stToolbar"] { display: none; }
+.stDeployButton { display: none; }
+#MainMenu { display: none; }
+footer { display: none; }
+header { display: none !important; }
+.block-container { padding: 0 !important; max-width: 100% !important; }
+section[data-testid="stSidebar"] .block-container { padding: 0 !important; }
+
+/* ── SIDEBAR LOGO ── */
+.logo-wrap {
+    padding: 28px 20px 20px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    margin-bottom: 8px;
+}
+.logo-mark {
+    font-family: 'Syne', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: -0.5px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.logo-dot {
+    width: 8px; height: 8px;
+    background: #6d28d9;
+    border-radius: 50%;
+    display: inline-block;
+}
+.logo-sub {
+    font-size: 11px;
+    color: rgba(255,255,255,0.25);
+    margin-top: 3px;
+    letter-spacing: 0.5px;
+}
+
+/* ── NAV ── */
+.nav-section {
+    padding: 16px 20px 6px;
+    font-size: 9px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.2);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+}
+.nav-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px;
+    margin: 1px 8px;
+    border-radius: 8px;
+    font-size: 13px;
+    color: rgba(255,255,255,0.35);
+    cursor: pointer;
+    transition: all 0.2s;
+    text-decoration: none;
+}
+.nav-link:hover { background: rgba(255,255,255,0.04); color: rgba(255,255,255,0.7); }
+.nav-link.active {
+    background: rgba(109,40,217,0.15);
+    color: #a78bfa;
+    border: 1px solid rgba(109,40,217,0.2);
+}
+.nav-icon { font-size: 15px; width: 18px; text-align: center; }
+
+/* ── MAIN HEADER ── */
+.main-header {
+    background: #0c0c18;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    padding: 16px 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.header-left { display: flex; align-items: center; gap: 12px; }
+.header-icon {
+    width: 36px; height: 36px;
+    background: rgba(109,40,217,0.15);
+    border: 1px solid rgba(109,40,217,0.2);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+}
+.header-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    color: #fff;
+}
+.header-sub { font-size: 11px; color: rgba(255,255,255,0.3); margin-top: 1px; }
+.header-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+.hpill {
+    display: flex; align-items: center; gap: 5px;
+    padding: 5px 11px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 20px;
+    font-size: 11px;
+    color: rgba(255,255,255,0.35);
+}
+
+/* ── CONTENT ── */
+.main-content { padding: 20px 28px; background: #07070f; min-height: calc(100vh - 70px); }
+
+/* ── STAT CARDS ── */
+.stats-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-bottom: 16px;
+}
+.stat-card {
+    background: #0c0c18;
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px;
+    padding: 14px 16px;
+}
+.stat-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.stat-badge {
+    width: 28px; height: 28px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px;
+}
+.sb-p { background: rgba(109,40,217,0.15); }
+.sb-b { background: rgba(59,130,246,0.15); }
+.sb-g { background: rgba(16,185,129,0.15); }
+.sb-a { background: rgba(245,158,11,0.15); }
+.stat-num {
+    font-family: 'Syne', sans-serif;
+    font-size: 24px;
+    font-weight: 700;
+    color: #fff;
+}
+.stat-lbl { font-size: 11px; color: rgba(255,255,255,0.3); margin-top: 2px; }
+
+/* ── MODEL SELECTOR ── */
+.model-row { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+.model-chip {
+    padding: 6px 12px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 8px;
+    font-size: 11px;
+    color: rgba(255,255,255,0.3);
+    cursor: pointer;
+}
+.model-chip.sel {
+    background: rgba(109,40,217,0.15);
+    border-color: rgba(109,40,217,0.3);
+    color: #a78bfa;
+}
+
+/* ── CHAT CONTAINER ── */
+.chat-container {
+    background: #0c0c18;
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 14px;
+    overflow: hidden;
+}
+.chat-top {
+    padding: 12px 18px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.online-row { display: flex; align-items: center; gap: 8px; }
+.online-dot {
+    width: 7px; height: 7px;
+    background: #10b981;
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+.chat-title { font-size: 13px; font-weight: 500; color: #fff; }
+.chat-sub { font-size: 10px; color: rgba(255,255,255,0.25); }
+
+/* ── STREAMLIT OVERRIDES ── */
+.stTextInput input, .stTextArea textarea, .stSelectbox > div > div {
+    background: rgba(255,255,255,0.04) !important;
+    border: 1px solid rgba(255,255,255,0.08) !important;
+    color: #fff !important;
+    border-radius: 10px !important;
+}
+.stButton > button {
+    background: #6d28d9 !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: 10px !important;
+    font-family: 'DM Sans', sans-serif !important;
+    font-weight: 500 !important;
+    padding: 10px 20px !important;
+    transition: all 0.2s !important;
+}
+.stButton > button:hover {
+    background: #7c3aed !important;
+    transform: translateY(-1px) !important;
+}
+.stSelectbox label, .stTextArea label, .stTextInput label,
+.stSlider label, .stFileUploader label {
+    color: rgba(255,255,255,0.5) !important;
+    font-size: 12px !important;
+}
+.stSlider [data-baseweb="slider"] div { background: #6d28d9 !important; }
+.stSuccess { background: rgba(16,185,129,0.1) !important; border: 1px solid rgba(16,185,129,0.2) !important; border-radius: 10px !important; }
+.stWarning { background: rgba(245,158,11,0.1) !important; border: 1px solid rgba(245,158,11,0.2) !important; border-radius: 10px !important; }
+.stError { background: rgba(239,68,68,0.1) !important; border: 1px solid rgba(239,68,68,0.2) !important; border-radius: 10px !important; }
+.stInfo { background: rgba(109,40,217,0.1) !important; border: 1px solid rgba(109,40,217,0.2) !important; border-radius: 10px !important; }
+.stChatInput textarea {
+    background: rgba(255,255,255,0.04) !important;
+    border: 1px solid rgba(255,255,255,0.08) !important;
+    color: #fff !important;
+    border-radius: 12px !important;
+}
+.stChatInput > div {
+    background: #0c0c18 !important;
+    border-top: 1px solid rgba(255,255,255,0.05) !important;
+    padding: 12px 18px !important;
+}
+[data-testid="stChatMessageAvatarAssistant"] { background: rgba(109,40,217,0.2) !important; }
+[data-testid="stChatMessageAvatarUser"] { background: rgba(59,130,246,0.2) !important; }
+.stMarkdown p, .stMarkdown li { color: rgba(255,255,255,0.75) !important; font-size: 13px !important; line-height: 1.7 !important; }
+.stMarkdown h1,.stMarkdown h2,.stMarkdown h3 { color: #fff !important; font-family: 'Syne', sans-serif !important; }
+.stMarkdown code { background: rgba(109,40,217,0.15) !important; color: #a78bfa !important; border-radius: 4px !important; padding: 1px 6px !important; }
+.stMarkdown pre { background: rgba(255,255,255,0.04) !important; border: 1px solid rgba(255,255,255,0.08) !important; border-radius: 10px !important; }
+hr { border-color: rgba(255,255,255,0.06) !important; }
+.stFileUploader {
+    background: rgba(255,255,255,0.03) !important;
+    border: 1px dashed rgba(255,255,255,0.1) !important;
+    border-radius: 12px !important;
+    padding: 12px !important;
+}
+.stRadio label { color: rgba(255,255,255,0.6) !important; }
+.stCheckbox label { color: rgba(255,255,255,0.6) !important; }
+div[data-testid="column"] { gap: 10px; }
+.stTabs [data-baseweb="tab-list"] { background: transparent !important; border-bottom: 1px solid rgba(255,255,255,0.06) !important; }
+.stTabs [data-baseweb="tab"] { color: rgba(255,255,255,0.4) !important; background: transparent !important; }
+.stTabs [aria-selected="true"] { color: #a78bfa !important; border-bottom: 2px solid #6d28d9 !important; }
+.stProgress > div > div { background: #6d28d9 !important; border-radius: 10px !important; }
+.stProgress > div { background: rgba(255,255,255,0.06) !important; border-radius: 10px !important; }
+div[data-testid="metric-container"] {
+    background: #0c0c18 !important;
+    border: 1px solid rgba(255,255,255,0.06) !important;
+    border-radius: 12px !important;
+    padding: 14px !important;
+}
+div[data-testid="metric-container"] label { color: rgba(255,255,255,0.35) !important; font-size: 11px !important; }
+div[data-testid="metric-container"] [data-testid="stMetricValue"] { color: #fff !important; font-family: 'Syne', sans-serif !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── MODELS ──
 MODELS = {
-    "⚡ Llama 3.1 8B (Fast)":        "llama-3.1-8b-instant",
-    "🧠 Llama 3.3 70B (Smart)":      "llama-3.3-70b-versatile",
-    "💎 Mixtral 8x7B (Balanced)":    "mixtral-8x7b-32768",
-    "🔬 Gemma 2 9B (Google)":        "gemma2-9b-it",
-    "🚀 DeepSeek R1 (Reasoning)":    "deepseek-r1-distill-llama-70b",
+    "✦ Llama 3.3 70B": "llama-3.3-70b-versatile",
+    "⚡ Llama 3.1 8B": "llama-3.1-8b-instant",
+    "◈ Mixtral 8x7B": "mixtral-8x7b-32768",
+    "◉ Gemma 2 9B": "gemma2-9b-it",
+    "▲ DeepSeek R1": "deepseek-r1-distill-llama-70b",
 }
 
 LANGUAGES = {
-    "English": "Respond in English only.",
+    "English": "Respond in English.",
     "Hindi": "Hamesha Hindi mein jawab do.",
-    "Hinglish": "Hinglish mein jawab do — Hindi aur English mix karke, jaise dost baat karte hain.",
+    "Hinglish": "Hinglish mein jawab do.",
     "Marathi": "Marathi madhe uttar dya.",
 }
 
 # ── SIDEBAR ──
 with st.sidebar:
-    st.markdown("## ⚙ Aura Settings")
-    st.markdown("---")
+    st.markdown("""
+    <div class='logo-wrap'>
+        <div class='logo-mark'><span class='logo-dot'></span> Aura AI</div>
+        <div class='logo-sub'>Intelligent Assistant Suite</div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    feature = st.selectbox("🧩 Choose Feature", [
-        "💬 AI Chat",
-        "🎨 Image Generator",
-        "🖼 Image Analyzer",
-        "📄 PDF Chat",
-        "🌤 Weather",
-        "💻 Code Assistant",
-    ])
+    st.markdown("<div class='nav-section'>Features</div>", unsafe_allow_html=True)
+    feature = st.selectbox("", [
+        "✦ AI Chat",
+        "◈ Image Generator",
+        "◉ Image Analyzer",
+        "▲ PDF Chat",
+        "⬡ Weather",
+        "⟨⟩ Code Assistant",
+    ], label_visibility="collapsed")
 
-    if "Chat" in feature or "Code" in feature or "PDF" in feature:
-        st.markdown("**🤖 AI Model:**")
-        selected_model_name = st.selectbox("Model", list(MODELS.keys()))
+    if any(x in feature for x in ["Chat", "Code", "PDF"]):
+        st.markdown("<div class='nav-section' style='margin-top:16px;'>Model</div>", unsafe_allow_html=True)
+        selected_model_name = st.selectbox("", list(MODELS.keys()), label_visibility="collapsed")
         selected_model = MODELS[selected_model_name]
 
-        st.markdown("**🌍 Language:**")
-        selected_lang = st.selectbox("Language", list(LANGUAGES.keys()))
+        st.markdown("<div class='nav-section'>Language</div>", unsafe_allow_html=True)
+        selected_lang = st.selectbox("", list(LANGUAGES.keys()), label_visibility="collapsed")
 
-        temperature = st.slider("🎨 Creativity", 0.1, 1.0, 0.7)
-        max_tokens = st.slider("📏 Max Tokens", 100, 4000, 1000)
+        temperature = st.slider("Creativity", 0.1, 1.0, 0.7)
+        max_tokens = st.slider("Response Length", 100, 4000, 1000)
 
-        if st.button("🗑 Clear Chat"):
-            for key in ["messages", "pdf_text", "image_b64"]:
-                if key in st.session_state:
-                    del st.session_state[key]
+        if st.button("⟳ Clear Session"):
+            for k in ["messages", "pdf_text"]:
+                if k in st.session_state:
+                    del st.session_state[k]
             st.rerun()
 
-        # Export chat
         if "messages" in st.session_state and len(st.session_state.messages) > 0:
-            chat_export = "\n\n".join([
+            chat_text = "\n\n".join([
                 f"{'You' if m['role']=='user' else 'Aura'}: {m['content']}"
                 for m in st.session_state.messages
             ])
-            st.download_button(
-                "📥 Export Chat",
-                chat_export,
-                file_name=f"aura_chat_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
-                mime="text/plain"
-            )
+            st.download_button("↓ Export Chat", chat_text, file_name="aura_chat.txt", mime="text/plain")
 
-    st.markdown("---")
-    st.caption("Built by Rupal Darode 🚀")
+    st.markdown("<div style='position:absolute;bottom:20px;left:0;right:0;padding:0 8px;'>", unsafe_allow_html=True)
+    st.markdown("""
+    <div style='background:rgba(109,40,217,0.1);border:1px solid rgba(109,40,217,0.2);border-radius:10px;padding:12px 14px;margin:8px;'>
+        <div style='font-size:11px;font-weight:600;color:#a78bfa;font-family:Syne,sans-serif;'>Aura Pro</div>
+        <div style='font-size:10px;color:rgba(255,255,255,0.3);margin-top:2px;'>Unlimited AI · All features</div>
+        <div style='margin-top:8px;font-size:11px;color:rgba(255,255,255,0.5);'>Built by Rupal Darode ✦</div>
+    </div>
+    """, unsafe_allow_html=True)
 
 
-# ── HELPER: CALL GROQ ──
+# ── GROQ HELPER ──
 def call_groq(messages, model, temperature=0.7, max_tokens=1000):
     try:
-        GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-    except Exception:
-        return "❌ GROQ_API_KEY not found in Streamlit secrets. Please add it in Settings → Secrets."
+        key = st.secrets["GROQ_API_KEY"]
+    except:
+        return "❌ GROQ_API_KEY not found in secrets."
     try:
-        headers = {
-            "Authorization": f"Bearer {GROQ_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
         res = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
-            headers=headers, json=payload, timeout=30
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            json={"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens},
+            timeout=30
         )
         data = res.json()
         if "choices" in data:
-            return data["choices"][0]["message"]["content"]
+            return data["choices"][0]["message"]["content"].strip()
         elif "error" in data:
-            return f"❌ API Error: {data['error']['message']}"
-        else:
-            return f"❌ Unexpected: {data}"
-    except requests.exceptions.Timeout:
-        return "⏱ Request timed out. Please try again."
+            return f"❌ {data['error']['message']}"
+        return "❌ Unexpected error."
     except Exception as e:
-        return f"❌ Error: {str(e)}"
+        return f"❌ {str(e)}"
 
 
-# ── HELPER: RENDER CHAT ──
-def render_chat(system_prompt):
+# ── HEADER RENDERER ──
+def render_header(icon, title, subtitle, pills=[]):
+    pills_html = "".join([f"<div class='hpill'>{p}</div>" for p in pills])
+    st.markdown(f"""
+    <div class='main-header'>
+        <div class='header-left'>
+            <div class='header-icon'>{icon}</div>
+            <div>
+                <div class='header-title'>{title}</div>
+                <div class='header-sub'>{subtitle}</div>
+            </div>
+        </div>
+        <div class='header-pills'>{pills_html}</div>
+    </div>
+    <div class='main-content'>
+    """, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════
+# AI CHAT
+# ══════════════════════════════════════════
+if "Chat" in feature:
+    render_header("✦", "AI Chat", "Multi-model intelligent assistant",
+                  [selected_model_name, selected_lang, "◈ Attach Image"])
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Session Messages", len(st.session_state.get("messages", [])))
+    col2.metric("Model", "70B" if "70B" in selected_model_name else "8B" if "8B" in selected_model_name else "MX")
+    col3.metric("Language", selected_lang[:3].upper())
+    col4.metric("Creativity", f"{int(temperature*100)}%")
+
+    st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+    uploaded_img = st.file_uploader("Attach image (optional)", type=["png","jpg","jpeg","webp"])
+    img_note = ""
+    if uploaded_img:
+        img = Image.open(uploaded_img)
+        st.image(img, width=250)
+        img_note = " [User has attached an image — acknowledge it.]"
+
     if "messages" not in st.session_state:
         st.session_state.messages = []
+
+    st.markdown("""
+    <div style='background:#0c0c18;border:1px solid rgba(255,255,255,0.06);border-radius:14px;padding:12px 18px 4px;margin-bottom:8px;'>
+    <div style='display:flex;align-items:center;gap:8px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.05);margin-bottom:10px;'>
+    <div style='width:7px;height:7px;background:#10b981;border-radius:50%;'></div>
+    <span style='font-size:12px;font-weight:500;color:#fff;'>Aura Assistant</span>
+    <span style='font-size:10px;color:rgba(255,255,255,0.25);'>· Online · {}</span>
+    </div>
+    """.format(selected_model_name), unsafe_allow_html=True)
 
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    prompt = st.chat_input("Type your message...")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    prompt = st.chat_input("Message Aura...")
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
-
-        all_messages = [{"role": "system", "content": system_prompt}] + [
-            {"role": m["role"], "content": m["content"]}
-            for m in st.session_state.messages
+        system = f"You are Aura, a helpful AI assistant. {LANGUAGES[selected_lang]}{img_note}"
+        all_msgs = [{"role": "system", "content": system}] + [
+            {"role": m["role"], "content": m["content"]} for m in st.session_state.messages
         ]
-
         with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                reply = call_groq(all_messages, selected_model, temperature, max_tokens)
+            with st.spinner(""):
+                reply = call_groq(all_msgs, selected_model, temperature, max_tokens)
                 st.markdown(reply)
                 st.session_state.messages.append({"role": "assistant", "content": reply})
 
 
 # ══════════════════════════════════════════
-# FEATURE 1: AI CHAT
+# IMAGE GENERATOR
 # ══════════════════════════════════════════
-if "AI Chat" in feature:
-    st.markdown("<div class='main-title'>🤖 Aura AI</div>", unsafe_allow_html=True)
-    st.markdown("<div class='subtitle'>Multi-Model AI Assistant</div>", unsafe_allow_html=True)
-    st.caption(f"Model: {selected_model_name} | Language: {selected_lang}")
+elif "Image" in feature and "Gen" in feature or "◈" in feature:
+    render_header("◈", "Image Generator", "Text to image · Powered by Pollinations AI", ["Free · No API Key"])
 
-    # Image upload for visual chat
-    uploaded_img = st.file_uploader("📸 Attach an image (optional)", type=["png", "jpg", "jpeg", "webp"])
-    img_context = ""
-    if uploaded_img:
-        img = Image.open(uploaded_img)
-        st.image(img, width=300)
-        # Convert to base64 for context description
-        buffered = BytesIO()
-        img.save(buffered, format="PNG")
-        img_b64 = base64.b64encode(buffered.getvalue()).decode()
-        img_context = f"\n\n[User has attached an image. Acknowledge it and help them.]"
-
-    system_prompt = f"You are Aura, a helpful and friendly AI assistant. {LANGUAGES[selected_lang]}{img_context}"
-    render_chat(system_prompt)
-
-
-# ══════════════════════════════════════════
-# FEATURE 2: IMAGE GENERATOR
-# ══════════════════════════════════════════
-elif "Image Generator" in feature:
-    st.markdown("<div class='main-title'>🎨 Image Generator</div>", unsafe_allow_html=True)
-    st.markdown("<div class='subtitle'>Powered by Pollinations AI — Free!</div>", unsafe_allow_html=True)
-
-    # Style presets
-    styles = {
-        "None": "",
-        "Realistic": ", ultra realistic, 8k, cinematic lighting",
-        "Anime": ", anime style, vibrant colors, Studio Ghibli",
-        "Oil Painting": ", oil painting, detailed brushwork, museum quality",
-        "Cyberpunk": ", cyberpunk, neon lights, futuristic city, blade runner",
-        "Watercolor": ", watercolor art, soft colors, artistic",
-        "Sketch": ", pencil sketch, hand drawn, detailed",
+    STYLES = {
+        "None": "", "Photorealistic": ", ultra realistic, 8k, cinematic",
+        "Anime": ", anime style, Studio Ghibli, vibrant",
+        "Oil Painting": ", oil painting, museum quality, detailed",
+        "Cyberpunk": ", cyberpunk, neon lights, blade runner aesthetic",
+        "Watercolor": ", watercolor, soft artistic strokes",
+        "Minimalist": ", minimalist, clean lines, white background",
+        "Dark Fantasy": ", dark fantasy, dramatic lighting, cinematic",
     }
 
-    image_prompt = st.text_area("✍ Describe your image",
-                                placeholder="A beautiful Indian woman in traditional saree, golden hour...")
-
+    prompt = st.text_area("Describe your image", height=100,
+                           placeholder="A serene Japanese garden at sunset, cherry blossoms falling...")
     col1, col2, col3 = st.columns(3)
-    with col1:
-        style = st.selectbox("🎭 Style", list(styles.keys()))
-    with col2:
-        width = st.slider("Width", 256, 1024, 512, step=64)
-    with col3:
-        height = st.slider("Height", 256, 1024, 512, step=64)
+    with col1: style = st.selectbox("Style Preset", list(STYLES.keys()))
+    with col2: width = st.slider("Width", 256, 1024, 768, step=64)
+    with col3: height = st.slider("Height", 256, 1024, 512, step=64)
 
-    negative = st.text_input("🚫 Negative prompt (what to avoid)", placeholder="blurry, ugly, distorted...")
-
-    if st.button("✨ Generate Image", use_container_width=True):
-        if image_prompt.strip():
-            with st.spinner("🎨 Creating your image..."):
+    if st.button("✦ Generate Image", use_container_width=True):
+        if prompt.strip():
+            with st.spinner("Creating your image..."):
                 try:
-                    full_prompt = image_prompt + styles[style]
-                    encoded = urllib.parse.quote(full_prompt)
-                    url = f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&nologo=true"
-                    response = requests.get(url, timeout=60)
-                    response.raise_for_status()
-                    image = Image.open(BytesIO(response.content))
-                    st.image(image, use_container_width=True)
+                    full = prompt + STYLES[style]
+                    url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(full)}?width={width}&height={height}&nologo=true"
+                    res = requests.get(url, timeout=60)
+                    img = Image.open(BytesIO(res.content))
+                    st.image(img, use_container_width=True)
                     buf = BytesIO()
-                    image.save(buf, format="PNG")
-                    st.download_button("⬇ Download Image", buf.getvalue(),
-                                       file_name="aura_image.png", mime="image/png",
-                                       use_container_width=True)
+                    img.save(buf, format="PNG")
+                    st.download_button("↓ Download Image", buf.getvalue(),
+                                       file_name="aura_image.png", mime="image/png", use_container_width=True)
                 except Exception as e:
-                    st.error(f"❌ Failed: {e}")
+                    st.error(f"Generation failed: {e}")
         else:
-            st.warning("Please enter a prompt!")
+            st.warning("Enter a prompt first.")
 
 
 # ══════════════════════════════════════════
-# FEATURE 3: IMAGE ANALYZER
+# IMAGE ANALYZER
 # ══════════════════════════════════════════
-elif "Image Analyzer" in feature:
-    st.markdown("<div class='main-title'>🖼 Image Analyzer</div>", unsafe_allow_html=True)
-    st.markdown("<div class='subtitle'>Upload any image and ask questions about it</div>", unsafe_allow_html=True)
+elif "Analyzer" in feature or "◉" in feature:
+    render_header("◉", "Image Analyzer", "Upload any image · Ask questions · Get AI insights", ["Gemini Vision"])
 
-    uploaded = st.file_uploader("Upload an image", type=["png", "jpg", "jpeg", "webp"])
-
+    uploaded = st.file_uploader("Upload image", type=["png","jpg","jpeg","webp"])
     if uploaded:
         image = Image.open(uploaded)
         st.image(image, use_container_width=True)
 
-        # Quick action buttons
-        st.markdown("**Quick Actions:**")
+        st.markdown("<div style='display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;'>", unsafe_allow_html=True)
         col1, col2, col3, col4 = st.columns(4)
-        quick_q = ""
+        q = ""
         with col1:
-            if st.button("📝 Describe"): quick_q = "Describe this image in detail."
+            if st.button("Describe", use_container_width=True): q = "Describe this image in detail."
         with col2:
-            if st.button("🎨 Colors"): quick_q = "What are the main colors in this image?"
+            if st.button("Colors", use_container_width=True): q = "What are the main colors?"
         with col3:
-            if st.button("😊 Mood"): quick_q = "What is the mood or emotion of this image?"
+            if st.button("Mood", use_container_width=True): q = "What is the mood of this image?"
         with col4:
-            if st.button("📊 Objects"): quick_q = "List all objects you can identify in this image."
+            if st.button("Objects", use_container_width=True): q = "List all objects you can see."
 
-        user_q = st.text_input("Or ask your own question:", value=quick_q,
-                               placeholder="What is happening in this image?")
+        question = st.text_input("Or ask your own question", value=q, placeholder="What is happening in this image?")
 
-        if st.button("🔍 Analyze", use_container_width=True):
-            if user_q:
-                with st.spinner("Analyzing..."):
-                    # Convert image to base64
-                    buffered = BytesIO()
-                    image.save(buffered, format="PNG")
-                    img_b64 = base64.b64encode(buffered.getvalue()).decode()
+        if st.button("◉ Analyze", use_container_width=True):
+            if question.strip():
+                try:
+                    gemini_key = st.secrets["GEMINI_API_KEY"]
+                    buf = BytesIO()
+                    image.save(buf, format="PNG")
+                    img_b64 = base64.b64encode(buf.getvalue()).decode()
 
-                    # Use Groq's vision-capable model with image description
-                    # Since Groq doesn't support vision directly, we describe via prompt
-                    system = "You are an expert image analyst. The user will describe what they see or ask about an image. Be helpful and detailed."
-                    messages = [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": f"I have uploaded an image. {user_q} Please provide a detailed analysis based on common image analysis techniques."}
-                    ]
-                    reply = call_groq(messages, "llama-3.3-70b-versatile", 0.3, 1000)
-                    st.success(reply)
+                    with st.spinner("Analyzing..."):
+                        res = requests.post(
+                            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}",
+                            json={"contents": [{"parts": [
+                                {"inline_data": {"mime_type": "image/png", "data": img_b64}},
+                                {"text": question}
+                            ]}]},
+                            timeout=30
+                        )
+                        data = res.json()
+                        if "candidates" in data:
+                            reply = data["candidates"][0]["content"]["parts"][0]["text"]
+                            st.success(reply)
+                        else:
+                            st.error(f"Error: {data}")
+                except KeyError:
+                    st.error("❌ GEMINI_API_KEY not found. Add it in Streamlit secrets.")
+                except Exception as e:
+                    st.error(f"Error: {e}")
             else:
-                st.warning("Please enter a question!")
+                st.warning("Enter a question.")
     else:
-        st.info("👆 Upload an image to get started!")
+        st.info("Upload an image to get started.")
 
 
 # ══════════════════════════════════════════
-# FEATURE 4: PDF CHAT
+# PDF CHAT
 # ══════════════════════════════════════════
-elif "PDF" in feature:
-    st.markdown("<div class='main-title'>📄 PDF Chat</div>", unsafe_allow_html=True)
-    st.markdown("<div class='subtitle'>Upload a PDF and chat with it!</div>", unsafe_allow_html=True)
+elif "PDF" in feature or "▲" in feature:
+    render_header("▲", "PDF Chat", "Upload a document · Chat with it instantly", [selected_model_name])
 
-    uploaded_pdf = st.file_uploader("Upload PDF", type=["pdf"])
-
-    if uploaded_pdf:
+    pdf = st.file_uploader("Upload PDF", type=["pdf"])
+    if pdf:
         if "pdf_text" not in st.session_state:
             with st.spinner("Reading PDF..."):
                 try:
-                    pdf_reader = PyPDF2.PdfReader(io.BytesIO(uploaded_pdf.read()))
-                    text = ""
-                    for page in pdf_reader.pages:
-                        text += page.extract_text() + "\n"
-                    st.session_state.pdf_text = text[:8000]  # limit to 8000 chars
-                    st.success(f"✅ PDF loaded! {len(pdf_reader.pages)} pages read.")
+                    reader = PyPDF2.PdfReader(io.BytesIO(pdf.read()))
+                    text = "".join([p.extract_text() + "\n" for p in reader.pages])
+                    st.session_state.pdf_text = text[:8000]
+                    st.success(f"✦ PDF loaded — {len(reader.pages)} pages")
                 except Exception as e:
-                    st.error(f"❌ Could not read PDF: {e}")
+                    st.error(f"Could not read PDF: {e}")
 
         if "pdf_text" in st.session_state:
-            st.caption(f"📄 PDF loaded — {len(st.session_state.pdf_text)} characters")
-
-            system_prompt = f"""You are a helpful assistant. Answer questions based on this document:
-
----
-{st.session_state.pdf_text}
----
-
-If the answer is not in the document, say so clearly. {LANGUAGES[selected_lang]}"""
-
-            render_chat(system_prompt)
+            if "messages" not in st.session_state:
+                st.session_state.messages = []
+            for msg in st.session_state.messages:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
+            prompt = st.chat_input("Ask about your document...")
+            if prompt:
+                st.session_state.messages.append({"role": "user", "content": prompt})
+                with st.chat_message("user"):
+                    st.markdown(prompt)
+                system = f"Answer based on this document only:\n\n{st.session_state.pdf_text}\n\nIf not in document, say so. {LANGUAGES[selected_lang]}"
+                all_msgs = [{"role": "system", "content": system}] + [
+                    {"role": m["role"], "content": m["content"]} for m in st.session_state.messages
+                ]
+                with st.chat_message("assistant"):
+                    with st.spinner(""):
+                        reply = call_groq(all_msgs, selected_model, temperature, max_tokens)
+                        st.markdown(reply)
+                        st.session_state.messages.append({"role": "assistant", "content": reply})
     else:
-        st.info("👆 Upload a PDF to start chatting with it!")
-        if "messages" in st.session_state:
-            del st.session_state["messages"]
-        if "pdf_text" in st.session_state:
-            del st.session_state["pdf_text"]
+        st.info("Upload a PDF to start chatting with it.")
+        for k in ["messages", "pdf_text"]:
+            if k in st.session_state: del st.session_state[k]
 
 
 # ══════════════════════════════════════════
-# FEATURE 5: WEATHER
+# WEATHER
 # ══════════════════════════════════════════
-elif "Weather" in feature:
-    st.markdown("<div class='main-title'>🌤 Weather</div>", unsafe_allow_html=True)
-    st.markdown("<div class='subtitle'>Real-time weather for any city</div>", unsafe_allow_html=True)
+elif "Weather" in feature or "⬡" in feature:
+    render_header("⬡", "Weather", "Real-time weather for any city · AI-powered tips", ["Open-Meteo · Free"])
 
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        city = st.text_input("🏙 Enter city name", placeholder="Nagpur, Mumbai, Delhi...")
-    with col2:
-        unit = st.selectbox("Unit", ["Celsius", "Fahrenheit"])
+    col1, col2 = st.columns([3,1])
+    with col1: city = st.text_input("City", placeholder="Nagpur, Mumbai, Delhi, London...")
+    with col2: unit = st.selectbox("Unit", ["Celsius", "Fahrenheit"])
 
-    if st.button("🔍 Get Weather", use_container_width=True):
+    if st.button("⬡ Get Weather", use_container_width=True):
         if city.strip():
             with st.spinner("Fetching weather..."):
                 try:
-                    unit_code = "metric" if unit == "Celsius" else "imperial"
-                    unit_sym = "°C" if unit == "Celsius" else "°F"
-
-                    # Open-Meteo (completely free, no API key needed)
-                    geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={urllib.parse.quote(city)}&count=1"
-                    geo_res = requests.get(geo_url, timeout=10).json()
-
-                    if "results" not in geo_res or len(geo_res["results"]) == 0:
-                        st.error("City not found. Try another name.")
+                    geo = requests.get(f"https://geocoding-api.open-meteo.com/v1/search?name={urllib.parse.quote(city)}&count=1", timeout=10).json()
+                    if "results" not in geo:
+                        st.error("City not found.")
                     else:
-                        loc = geo_res["results"][0]
+                        loc = geo["results"][0]
                         lat, lon = loc["latitude"], loc["longitude"]
                         name = loc.get("name", city)
                         country = loc.get("country", "")
-
-                        weather_url = (
-                            f"https://api.open-meteo.com/v1/forecast?"
-                            f"latitude={lat}&longitude={lon}"
-                            f"&current=temperature_2m,relative_humidity_2m,"
-                            f"wind_speed_10m,weather_code,apparent_temperature"
-                            f"&temperature_unit={'celsius' if unit=='Celsius' else 'fahrenheit'}"
-                        )
-                        w = requests.get(weather_url, timeout=10).json()
+                        unit_param = "celsius" if unit == "Celsius" else "fahrenheit"
+                        sym = "°C" if unit == "Celsius" else "°F"
+                        w = requests.get(
+                            f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
+                            f"&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code,apparent_temperature"
+                            f"&temperature_unit={unit_param}", timeout=10
+                        ).json()
                         curr = w["current"]
+                        desc = {0:"☀ Clear",1:"🌤 Mainly clear",2:"⛅ Partly cloudy",3:"☁ Overcast",
+                                45:"🌫 Foggy",61:"🌧 Rain",63:"🌧 Moderate rain",80:"🌦 Showers",95:"⛈ Thunderstorm"
+                               }.get(curr["weather_code"], "🌡 Weather")
 
-                        temp = curr["temperature_2m"]
-                        feels = curr["apparent_temperature"]
-                        humidity = curr["relative_humidity_2m"]
-                        wind = curr["wind_speed_10m"]
-                        code = curr["weather_code"]
-
-                        # Weather code to description
-                        weather_desc = {
-                            0: "☀️ Clear sky", 1: "🌤 Mainly clear", 2: "⛅ Partly cloudy",
-                            3: "☁️ Overcast", 45: "🌫 Foggy", 48: "🌫 Icy fog",
-                            51: "🌦 Light drizzle", 61: "🌧 Light rain", 63: "🌧 Moderate rain",
-                            65: "🌧 Heavy rain", 71: "🌨 Light snow", 80: "🌦 Rain showers",
-                            95: "⛈ Thunderstorm",
-                        }
-                        desc = weather_desc.get(code, "🌡 Unknown")
-
-                        col1, col2, col3, col4 = st.columns(4)
-                        col1.metric("🌡 Temperature", f"{temp}{unit_sym}", f"Feels {feels}{unit_sym}")
-                        col2.metric("💧 Humidity", f"{humidity}%")
-                        col3.metric("💨 Wind Speed", f"{wind} km/h")
-                        col4.metric("🌤 Condition", desc)
+                        col1,col2,col3,col4 = st.columns(4)
+                        col1.metric("Temperature", f"{curr['temperature_2m']}{sym}", f"Feels {curr['apparent_temperature']}{sym}")
+                        col2.metric("Humidity", f"{curr['relative_humidity_2m']}%")
+                        col3.metric("Wind", f"{curr['wind_speed_10m']} km/h")
+                        col4.metric("Condition", desc)
 
                         st.success(f"Weather for **{name}, {country}**")
-
-                        # AI weather tip
                         with st.spinner("Getting AI tip..."):
-                            tip_messages = [
-                                {"role": "system", "content": "You are a helpful weather assistant. Give a short 2-3 line practical tip."},
-                                {"role": "user", "content": f"Weather in {name}: {temp}{unit_sym}, {desc}, humidity {humidity}%. What should I wear or do today?"}
-                            ]
-                            tip = call_groq(tip_messages, "llama-3.1-8b-instant", 0.7, 200)
-                            st.info(f"💡 AI Tip: {tip}")
-
+                            tip = call_groq([
+                                {"role": "system", "content": "You are a helpful weather assistant. Give a 2-line practical tip."},
+                                {"role": "user", "content": f"Weather: {curr['temperature_2m']}{sym}, {desc}, humidity {curr['relative_humidity_2m']}% in {name}. What to wear?"}
+                            ], "llama-3.1-8b-instant", 0.7, 150)
+                            st.info(f"✦ AI Tip: {tip}")
                 except Exception as e:
-                    st.error(f"❌ Error: {e}")
+                    st.error(f"Error: {e}")
         else:
-            st.warning("Please enter a city name!")
+            st.warning("Enter a city name.")
 
 
 # ══════════════════════════════════════════
-# FEATURE 6: CODE ASSISTANT
+# CODE ASSISTANT
 # ══════════════════════════════════════════
-elif "Code" in feature:
-    st.markdown("<div class='main-title'>💻 Code Assistant</div>", unsafe_allow_html=True)
-    st.markdown("<div class='subtitle'>Write, explain, debug and convert code</div>", unsafe_allow_html=True)
+elif "Code" in feature or "⟨⟩" in feature:
+    render_header("⟨⟩", "Code Assistant", "Write · Debug · Explain · Convert · Optimize", [selected_model_name])
 
-    code_action = st.selectbox("What do you want?", [
-        "✍️ Write code for me",
-        "🐛 Debug my code",
-        "📖 Explain this code",
-        "🔄 Convert to another language",
-        "⚡ Optimize my code",
-        "🧪 Write tests for my code",
-    ])
-
-    lang_options = ["Python", "JavaScript", "Java", "C++", "SQL", "HTML/CSS", "React", "Other"]
     col1, col2 = st.columns(2)
     with col1:
-        code_lang = st.selectbox("Programming Language", lang_options)
+        action = st.selectbox("Action", [
+            "✍ Write code", "🐛 Debug code", "📖 Explain code",
+            "🔄 Convert language", "⚡ Optimize code", "🧪 Write tests"
+        ])
     with col2:
-        if "Convert" in code_action:
-            target_lang = st.selectbox("Convert TO", lang_options)
-        else:
-            target_lang = None
+        lang = st.selectbox("Language", ["Python","JavaScript","Java","C++","SQL","HTML/CSS","React","TypeScript","Other"])
 
-    user_input = st.text_area("📝 Describe what you want / Paste your code here",
-                              height=200,
-                              placeholder="e.g. Write a function to sort a list in Python...")
+    if "Convert" in action:
+        target = st.selectbox("Convert to", ["JavaScript","Python","Java","TypeScript","Go","Rust"])
+    else:
+        target = None
 
-    if st.button("🚀 Run", use_container_width=True):
-        if user_input.strip():
+    code_input = st.text_area("Your code or description", height=200,
+                               placeholder="Paste your code or describe what you want...")
+
+    if st.button("⟨⟩ Run", use_container_width=True):
+        if code_input.strip():
             with st.spinner("Processing..."):
-                action_prompts = {
-                    "✍️ Write code for me": f"Write clean, well-commented {code_lang} code for: {user_input}. Include example usage.",
-                    "🐛 Debug my code": f"Debug this {code_lang} code and explain all issues found:\n\n{user_input}",
-                    "📖 Explain this code": f"Explain this {code_lang} code step by step in simple terms:\n\n{user_input}",
-                    "🔄 Convert to another language": f"Convert this {code_lang} code to {target_lang}:\n\n{user_input}",
-                    "⚡ Optimize my code": f"Optimize this {code_lang} code for better performance:\n\n{user_input}",
-                    "🧪 Write tests for my code": f"Write comprehensive unit tests for this {code_lang} code:\n\n{user_input}",
+                prompts = {
+                    "✍ Write code": f"Write clean, well-commented {lang} code for: {code_input}. Include example usage.",
+                    "🐛 Debug code": f"Debug this {lang} code, explain all issues and provide fixed version:\n\n{code_input}",
+                    "📖 Explain code": f"Explain this {lang} code step-by-step in simple terms:\n\n{code_input}",
+                    "🔄 Convert language": f"Convert this {lang} code to {target}:\n\n{code_input}",
+                    "⚡ Optimize code": f"Optimize this {lang} code for better performance:\n\n{code_input}",
+                    "🧪 Write tests": f"Write comprehensive unit tests for this {lang} code:\n\n{code_input}",
                 }
-
-                messages = [
-                    {"role": "system", "content": "You are an expert programmer. Always provide clean, working code with explanations. Format code in proper markdown code blocks."},
-                    {"role": "user", "content": action_prompts[code_action]}
-                ]
-                reply = call_groq(messages, selected_model, 0.3, max_tokens)
+                reply = call_groq([
+                    {"role": "system", "content": "You are an expert programmer. Provide clean, working code with explanations in markdown code blocks."},
+                    {"role": "user", "content": prompts[action]}
+                ], selected_model, 0.3, max_tokens)
                 st.markdown(reply)
-
-                # Copy button
-                st.download_button(
-                    "📥 Download Response",
-                    reply,
-                    file_name="aura_code.txt",
-                    mime="text/plain"
-                )
+                st.download_button("↓ Download", reply, file_name="aura_code.txt", mime="text/plain")
         else:
-            st.warning("Please enter your code or description!")
+            st.warning("Enter your code or description.")
 
-
-# ── FOOTER ──
-st.markdown("---")
-st.markdown(
-    "<center style='color: #555; font-size: 12px;'>Built with ❤️ by Rupal Darode | Aura AI 🤖 | Powered by Groq + Pollinations</center>",
-    unsafe_allow_html=True
-)
+st.markdown("</div>", unsafe_allow_html=True)
+st.markdown("""
+<div style='text-align:center;padding:20px 0 8px;font-size:11px;color:rgba(255,255,255,0.15);'>
+Built with ✦ by Rupal Darode &nbsp;·&nbsp; Aura AI &nbsp;·&nbsp; Powered by Groq + Gemini
+</div>
+""", unsafe_allow_html=True)
