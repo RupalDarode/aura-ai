@@ -8,10 +8,40 @@ import PyPDF2
 import io
 
 st.set_page_config(page_title="Aura AI", page_icon="✦", layout="wide", initial_sidebar_state="expanded")
-
 st.markdown("""
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
+* { box-sizing: border-box; }
+html, body, .stApp { background: #07070f !important; }
+.stApp { font-family: 'DM Sans', sans-serif; }
+[data-testid="stSidebar"] { background: #0c0c18 !important; border-right: 1px solid rgba(255,255,255,0.05) !important; }
+[data-testid="stSidebar"] > div { padding-top: 0 !important; }
+div[data-testid="stToolbar"] { display: none; }
+.stDeployButton { display: none; }
+#MainMenu { display: none; }
+footer { display: none; }
+header { display: none !important; }
+.block-container { padding: 0 !important; max-width: 100% !important; }
+.stButton > button { background: #6d28d9 !important; color: #fff !important; border: none !important; border-radius: 10px !important; font-weight: 500 !important; padding: 10px 20px !important; }
+.stButton > button:hover { background: #7c3aed !important; }
+.stTextInput input, .stTextArea textarea { background: rgba(255,255,255,0.04) !important; border: 1px solid rgba(255,255,255,0.08) !important; color: #fff !important; border-radius: 10px !important; }
+.stSelectbox label, .stTextArea label, .stTextInput label, .stSlider label, .stFileUploader label { color: rgba(255,255,255,0.5) !important; font-size: 12px !important; }
+.stSuccess { background: rgba(16,185,129,0.1) !important; border: 1px solid rgba(16,185,129,0.2) !important; border-radius: 10px !important; }
+.stWarning { background: rgba(245,158,11,0.1) !important; border: 1px solid rgba(245,158,11,0.2) !important; border-radius: 10px !important; }
+.stError { background: rgba(239,68,68,0.1) !important; border: 1px solid rgba(239,68,68,0.2) !important; border-radius: 10px !important; }
+.stInfo { background: rgba(109,40,217,0.1) !important; border: 1px solid rgba(109,40,217,0.2) !important; border-radius: 10px !important; }
+.stMarkdown p, .stMarkdown li { color: rgba(255,255,255,0.75) !important; font-size: 13px !important; }
+.stMarkdown h1,.stMarkdown h2,.stMarkdown h3 { color: #fff !important; font-family: 'Syne', sans-serif !important; }
+.stMarkdown code { background: rgba(109,40,217,0.15) !important; color: #a78bfa !important; border-radius: 4px !important; }
+.stMarkdown pre { background: rgba(255,255,255,0.04) !important; border: 1px solid rgba(255,255,255,0.08) !important; border-radius: 10px !important; }
+.stChatInput textarea { background: rgba(255,255,255,0.04) !important; border: 1px solid rgba(255,255,255,0.08) !important; color: #fff !important; border-radius: 12px !important; }
+div[data-testid="metric-container"] { background: #0c0c18 !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 12px !important; padding: 14px !important; }
+div[data-testid="metric-container"] label { color: rgba(255,255,255,0.35) !important; font-size: 11px !important; }
+div[data-testid="metric-container"] [data-testid="stMetricValue"] { color: #fff !important; }
+hr { border-color: rgba(255,255,255,0.06) !important; }
+</style>
+""", unsafe_allow_html=True)
+
 /* ── RESET & BASE ── */
 * { box-sizing: border-box; }
 html, body, .stApp { background: #07070f !important; }
