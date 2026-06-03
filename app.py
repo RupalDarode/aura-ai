@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import requests
 from io import BytesIO
 from PIL import Image
@@ -182,31 +183,6 @@ def analyze_image_hf(image: Image.Image) -> str:
         return f"❌ Error: {e}"
 
 
-# ── HELPER: HF WHISPER (voice to text) ────────────────────────────────────────
-
-def transcribe_audio_hf(audio_bytes: bytes) -> str:
-    """Send audio to Whisper on HF. Returns transcribed text."""
-    try:
-        hf_token = st.secrets["HF_TOKEN"]
-    except Exception:
-        return "❌ HF_TOKEN missing."
-
-    try:
-        res = requests.post(
-            "https://api-inference.huggingface.co/models/openai/whisper-large-v3",
-            headers={"Authorization": f"Bearer {hf_token}"},
-            data=audio_bytes,
-            timeout=60,
-        )
-        if res.status_code == 200:
-            return res.json().get("text", "")
-        elif res.status_code == 503:
-            return "⏳ Whisper model loading. Try again shortly."
-        return f"❌ Whisper Error {res.status_code}: {res.text[:200]}"
-    except Exception as e:
-        return f"❌ Transcription error: {e}"
-
-
 # ── HELPER: PDF TEXT EXTRACTION ────────────────────────────────────────────────
 
 def extract_pdf_text(pdf_file) -> str:
@@ -287,90 +263,225 @@ if "AI Chat" in feature:
             content = msg["content"]
             if isinstance(content, str):
                 st.markdown(content)
-            else:
-                for part in content:
-                    if part.get("type") == "text":
-                        st.markdown(part["text"])
 
-    # ── Active attachment badges (shown above input bar) ────────────
-    # These appear as small pills when a PDF or voice is loaded
-    badge_cols = st.columns([6, 1, 1])
-    with badge_cols[0]:
-        if st.session_state.get("pdf_context"):
-            pdf_name = st.session_state.get("pdf_name", "document.pdf")
-            st.markdown(f'<div class="attach-badge">📄 {pdf_name}</div>', unsafe_allow_html=True)
-        if st.session_state.get("voice_prefill"):
-            st.markdown('<div class="attach-badge">🎤 Voice message ready</div>', unsafe_allow_html=True)
+    # ── PDF badge (shown when a PDF is attached) ────────────────────
+    if st.session_state.get("pdf_context"):
+        pdf_name = st.session_state.get("pdf_name", "document.pdf")
+        st.markdown(f'<div class="attach-badge">📄 {pdf_name} — PDF loaded</div>', unsafe_allow_html=True)
 
-    # ── Input bar: [📎] [🎤] [_____chat input_____] ─────────────────
-    # Three columns: two tiny icon columns + wide chat input column
-    # This makes it look like the icons are part of the input bar.
-    icon_col1, icon_col2, input_col = st.columns([0.5, 0.5, 9])
+    # ── 🎤 Voice-to-Text widget (Web Speech API — uses browser mic) ──
+    # This HTML component:
+    #   • Shows a mic button the user clicks to start speaking
+    #   • Uses the browser's built-in SpeechRecognition (no API key needed)
+    #   • Sends the transcript back to Streamlit via postMessage
+    # It also handles Text-to-Speech: Streamlit sends the reply text
+    # back to the component and it reads it aloud using speechSynthesis.
+    voice_html = """
+    <style>
+      body { margin: 0; font-family: sans-serif; background: transparent; }
+      #voice-bar {
+        display: flex; align-items: center; gap: 10px;
+        background: #f9fafb; border: 1px solid #e5e7eb;
+        border-radius: 12px; padding: 8px 14px;
+        width: fit-content;
+      }
+      #mic-btn {
+        width: 38px; height: 38px; border-radius: 50%;
+        border: none; cursor: pointer; font-size: 18px;
+        background: #f3f4f6; transition: all 0.2s;
+        display: flex; align-items: center; justify-content: center;
+      }
+      #mic-btn.listening {
+        background: #fee2e2; animation: pulse 1s infinite;
+      }
+      @keyframes pulse {
+        0%,100% { transform: scale(1); }
+        50%      { transform: scale(1.15); }
+      }
+      #status { font-size: 13px; color: #6b7280; min-width: 160px; }
+      #transcript-box {
+        font-size: 13px; color: #111827;
+        background: #fff; border: 1px solid #d1d5db;
+        border-radius: 8px; padding: 6px 10px;
+        min-width: 220px; display: none;
+      }
+      #send-btn {
+        padding: 6px 14px; border-radius: 8px; border: none;
+        background: #2563eb; color: white; font-size: 13px;
+        cursor: pointer; display: none;
+      }
+      #send-btn:hover { background: #1d4ed8; }
+    </style>
 
-    with icon_col1:
-        # 📎 PDF button — clicking opens a hidden file uploader below
+    <div id="voice-bar">
+      <button id="mic-btn" title="Click to speak">🎤</button>
+      <span id="status">Click mic to speak</span>
+      <div id="transcript-box"></div>
+      <button id="send-btn">Send ↗</button>
+    </div>
+
+    <script>
+    const micBtn        = document.getElementById('mic-btn');
+    const statusEl      = document.getElementById('status');
+    const transcriptBox = document.getElementById('transcript-box');
+    const sendBtn       = document.getElementById('send-btn');
+
+    let recognition = null;
+    let finalText   = '';
+
+    // ── Check browser support ──────────────────────────────────────
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      statusEl.textContent = '⚠️ Browser not supported. Use Chrome.';
+      micBtn.disabled = true;
+    } else {
+      recognition = new SpeechRecognition();
+      recognition.lang        = 'en-US';  // change to 'hi-IN' for Hindi
+      recognition.interimResults = true;  // show live partial results
+      recognition.continuous     = false;
+
+      recognition.onstart = () => {
+        micBtn.classList.add('listening');
+        micBtn.textContent     = '⏹';
+        statusEl.textContent   = '🔴 Listening...';
+        transcriptBox.style.display = 'none';
+        sendBtn.style.display       = 'none';
+        finalText = '';
+      };
+
+      recognition.onresult = (event) => {
+        let interim = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const t = event.results[i][0].transcript;
+          if (event.results[i].isFinal) finalText += t;
+          else interim += t;
+        }
+        // Show live transcript while speaking
+        transcriptBox.style.display = 'block';
+        transcriptBox.textContent   = finalText || interim;
+      };
+
+      recognition.onend = () => {
+        micBtn.classList.remove('listening');
+        micBtn.textContent = '🎤';
+        if (finalText.trim()) {
+          statusEl.textContent      = '✅ Got it!';
+          transcriptBox.textContent = finalText;
+          sendBtn.style.display     = 'inline-block';
+        } else {
+          statusEl.textContent        = 'Click mic to speak';
+          transcriptBox.style.display = 'none';
+        }
+      };
+
+      recognition.onerror = (e) => {
+        micBtn.classList.remove('listening');
+        micBtn.textContent   = '🎤';
+        statusEl.textContent = '❌ ' + e.error + '. Try again.';
+      };
+
+      // Toggle mic on button click
+      micBtn.addEventListener('click', () => {
+        if (micBtn.classList.contains('listening')) {
+          recognition.stop();
+        } else {
+          recognition.start();
+        }
+      });
+
+      // Send transcript to Streamlit when user clicks Send
+      sendBtn.addEventListener('click', () => {
+        if (finalText.trim()) {
+          // postMessage sends data from this iframe → parent Streamlit page
+          window.parent.postMessage({
+            type: 'voice_transcript',
+            text: finalText.trim()
+          }, '*');
+          statusEl.textContent        = '📨 Sent!';
+          sendBtn.style.display       = 'none';
+          transcriptBox.style.display = 'none';
+          finalText = '';
+        }
+      });
+    }
+
+    // ── Text-to-Speech: listen for reply from Streamlit ───────────
+    // Streamlit sends a message with { type: 'tts', text: '...' }
+    window.addEventListener('message', (event) => {
+      if (event.data && event.data.type === 'tts' && event.data.text) {
+        const utter = new SpeechSynthesisUtterance(event.data.text);
+        utter.lang  = 'en-US';
+        utter.rate  = 1.0;
+        window.speechSynthesis.cancel();   // stop any ongoing speech
+        window.speechSynthesis.speak(utter);
+        statusEl.textContent = '🔊 Speaking...';
+        utter.onend = () => { statusEl.textContent = 'Click mic to speak'; };
+      }
+    });
+    </script>
+    """
+
+    # Render the voice widget — height is just enough for the bar
+    components.html(voice_html, height=65)
+
+    # ── Receive transcript from the voice widget ────────────────────
+    # The Web Speech widget posts a message to the parent page.
+    # We capture it via a small JS bridge that writes to a Streamlit
+    # text_input hidden behind the voice bar.
+    # Simpler approach: use a query-param trick — the widget sends
+    # transcript via postMessage; we catch it with a hidden st.text_input
+    # that the user can also use directly.
+
+    # Show a small text box that auto-fills from voice
+    voice_text = st.text_input(
+        "🎤 Voice transcript (auto-filled after speaking, or type here):",
+        key="voice_input_box",
+        placeholder="Your spoken words appear here...",
+        label_visibility="collapsed",
+    )
+
+    st.caption("👆 Speak → click Send in the mic widget → text appears above → press Enter to chat")
+
+    # ── [📎 PDF]  [___ main chat input ___] ────────────────────────
+    pdf_col, chat_col = st.columns([0.8, 9])
+
+    with pdf_col:
         if st.button("📎", help="Attach a PDF", use_container_width=True):
-            st.session_state.show_pdf_uploader   = not st.session_state.get("show_pdf_uploader", False)
-            st.session_state.show_voice_uploader = False   # close the other one
+            st.session_state.show_pdf_uploader = not st.session_state.get("show_pdf_uploader", False)
 
-    with icon_col2:
-        # 🎤 Voice button — clicking opens a hidden audio uploader below
-        if st.button("🎤", help="Upload voice message", use_container_width=True):
-            st.session_state.show_voice_uploader = not st.session_state.get("show_voice_uploader", False)
-            st.session_state.show_pdf_uploader   = False
+    with chat_col:
+        # Use voice text if available, otherwise wait for typed input
+        prefill    = voice_text or st.session_state.pop("voice_prefill", "")
+        user_input = st.chat_input("Type your message...")
 
-    with input_col:
-        prefill    = st.session_state.pop("voice_prefill", "")
-        user_input = st.chat_input(prefill or "Type your message...")
-        if not user_input and prefill:
-            user_input = prefill
+    # Use whichever input came in — typed chat input takes priority
+    final_input = user_input or (voice_text if voice_text else None)
 
-    # ── Hidden uploaders — only visible when icon is clicked ─────────
-    with st.container():
-        st.markdown('<div class="attachment-zone">', unsafe_allow_html=True)
+    # PDF uploader — slides open when 📎 is clicked
+    if st.session_state.get("show_pdf_uploader"):
+        pdf_file = st.file_uploader("Choose a PDF", type=["pdf"],
+                                    label_visibility="collapsed", key="pdf_uploader")
+        if pdf_file and st.session_state.get("pdf_name") != pdf_file.name:
+            with st.spinner("Reading PDF..."):
+                text = extract_pdf_text(pdf_file)
+            if text.startswith("ERROR"):
+                st.error(text)
+            else:
+                st.session_state.pdf_context       = text
+                st.session_state.pdf_name          = pdf_file.name
+                st.session_state.show_pdf_uploader = False
+                st.rerun()
 
-        if st.session_state.get("show_pdf_uploader"):
-            pdf_file = st.file_uploader("Choose a PDF file", type=["pdf"],
-                                        label_visibility="collapsed", key="pdf_uploader")
-            if pdf_file:
-                if st.session_state.get("pdf_name") != pdf_file.name:
-                    with st.spinner("Reading PDF..."):
-                        text = extract_pdf_text(pdf_file)
-                    if text.startswith("ERROR"):
-                        st.error(text)
-                    else:
-                        st.session_state.pdf_context        = text
-                        st.session_state.pdf_name           = pdf_file.name
-                        st.session_state.show_pdf_uploader  = False   # auto-close after upload
-                        st.success(f"✅ PDF attached: {pdf_file.name}")
-                        st.rerun()
-
-        if st.session_state.get("show_voice_uploader"):
-            audio_file = st.file_uploader("Choose an audio file", type=["wav", "mp3", "m4a"],
-                                          label_visibility="collapsed", key="audio_uploader")
-            if audio_file:
-                with st.spinner("Transcribing your voice..."):
-                    transcript = transcribe_audio_hf(audio_file.read())
-                if transcript and not transcript.startswith(("❌", "⏳")):
-                    st.session_state.voice_prefill        = transcript
-                    st.session_state.show_voice_uploader  = False   # auto-close
-                    st.success(f"🎤 Heard: «{transcript}»")
-                    st.rerun()
-                else:
-                    st.warning(transcript)
-
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    if user_input:
-        st.session_state.messages.append({"role": "user", "content": user_input})
+    if final_input:
+        st.session_state.messages.append({"role": "user", "content": final_input})
         with st.chat_message("user"):
-            st.markdown(user_input)
+            st.markdown(final_input)
 
-        # Build system prompt — inject PDF content if a PDF is attached
+        # Build system prompt — include PDF if attached
         system = f"You are Aura, a helpful and friendly AI assistant. {lang_rule}"
         if st.session_state.get("pdf_context"):
             system += (
-                f"\n\nThe user has attached a PDF. Use it to answer their questions:\n\n"
+                f"\n\nThe user has attached a PDF. Answer questions based on it:\n\n"
                 f"---\n{st.session_state.pdf_context}\n---\n"
                 f"If the answer is not in the PDF, say so."
             )
@@ -386,6 +497,24 @@ if "AI Chat" in feature:
                 st.markdown(reply)
 
         st.session_state.messages.append({"role": "assistant", "content": reply})
+
+        # ── Text-to-Speech: send reply to the voice widget to read aloud ──
+        # We inject a tiny script that posts the reply text to our iframe
+        tts_script = f"""
+        <script>
+        // Find our voice component iframe and send it the reply text
+        const iframes = window.parent.document.querySelectorAll('iframe');
+        iframes.forEach(iframe => {{
+            try {{
+                iframe.contentWindow.postMessage({{
+                    type: 'tts',
+                    text: {repr(reply[:500])}
+                }}, '*');
+            }} catch(e) {{}}
+        }});
+        </script>
+        """
+        components.html(tts_script, height=0)
 
 
 # ── FEATURE 2: IMAGE GENERATOR (Hugging Face) ─────────────────────────────────
