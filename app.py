@@ -1,785 +1,664 @@
-import base64
-import io
-import os
-from datetime import datetime
-from typing import Any, Dict, List, Optional
-
-import requests
 import streamlit as st
 import streamlit.components.v1 as components
+import requests
+from io import BytesIO
 from PIL import Image
+import urllib.parse
+import base64
+import io
+import PyPDF2
+from datetime import datetime
 
-try:
-    import PyPDF2
-except ImportError:
-    PyPDF2 = None
+st.set_page_config(page_title="Aura AI", page_icon="✨", layout="wide")
 
-try:
-    import docx
-except ImportError:
-    docx = None
+st.markdown("""
+<style>
+    .stApp { background-color: #f9fafb; }
+    section[data-testid="stSidebar"] { background-color: #ffffff; border-right: 1px solid #e5e7eb; }
+    .stChatMessage { background-color: #ffffff !important; border: 1px solid #e5e7eb; border-radius: 10px; }
 
-
-# ============================================================
-# Aura AI - Streamlit + Hugging Face
-# Features:
-# 1. Conversational chatbot
-# 2. Voice to text and text to voice in the same chatbot
-# 3. Document upload
-# 4. PDF analyzer
-# 5. Image analyzer
-# 6. Image generation
-# 7. Weather forecasting
-#
-# Streamlit secrets:
-# HF_TOKEN = "hf_xxxxxxxxxxxxxxxxx"
-# ============================================================
-
-
-st.set_page_config(page_title="Aura AI", page_icon="AI", layout="wide")
-
-st.markdown(
-    """
-    <style>
-      .stApp { background: #f8fafc; }
-      section[data-testid="stSidebar"] {
-        background: #ffffff;
-        border-right: 1px solid #e5e7eb;
-      }
-      .stChatMessage {
-        background: #ffffff !important;
-        border: 1px solid #e5e7eb;
+    /* ── Inline attachment bar ── */
+    /* Hide the default file-uploader UI; we only show the clickable label */
+    .attachment-zone [data-testid="stFileUploader"] {
+        display: flex; align-items: center; gap: 0;
+    }
+    .attachment-zone [data-testid="stFileUploaderDropzone"] {
+        display: none !important;           /* hide the big drag-drop box */
+    }
+    .attachment-zone [data-testid="stFileUploaderDropzoneInstructions"] {
+        display: none !important;
+    }
+    /* Make the browse button look like a small icon button */
+    .attachment-zone [data-testid="stFileUploaderDropzone"] + div button,
+    .attachment-zone button[kind="secondary"] {
+        background: transparent !important;
+        border: none !important;
+        padding: 6px 10px !important;
+        font-size: 20px !important;
+        color: #6b7280 !important;
+        cursor: pointer;
         border-radius: 8px;
-      }
-      .small-note {
-        color: #64748b;
-        font-size: 0.9rem;
-      }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+        transition: background 0.15s;
+    }
+    .attachment-zone button[kind="secondary"]:hover {
+        background: #f3f4f6 !important;
+        color: #111827 !important;
+    }
+    /* Pill badge showing active attachment */
+    .attach-badge {
+        display: inline-flex; align-items: center; gap: 6px;
+        background: #eff6ff; border: 1px solid #bfdbfe;
+        border-radius: 999px; padding: 3px 10px;
+        font-size: 12px; color: #1d4ed8; margin-bottom: 6px;
+    }
+    .attach-badge button {
+        background: none; border: none; cursor: pointer;
+        font-size: 13px; color: #6b7280; padding: 0 2px;
+        line-height: 1;
+    }
+</style>
+""", unsafe_allow_html=True)
 
+# ── CONSTANTS ──────────────────────────────────────────────────────────────────
 
-HF_CHAT_MODELS = {
-    "Zephyr 7B Beta - chat": "HuggingFaceH4/zephyr-7b-beta",
-    "Mistral 7B Instruct - balanced": "mistralai/Mistral-7B-Instruct-v0.2",
-    "Llama 3.1 8B Instruct - strong": "meta-llama/Llama-3.1-8B-Instruct",
+GROQ_MODELS = {
+    "⚡ Llama 3.1 8B  — Fast":      "llama-3.1-8b-instant",
+    "🧠 Llama 3.3 70B — Smart":     "llama-3.3-70b-versatile",
+    "💎 Mixtral 8x7B  — Balanced":  "mixtral-8x7b-32768",
+    "🔬 Gemma 2 9B    — Google":    "gemma2-9b-it",
+    "🚀 DeepSeek R1   — Reasoning": "deepseek-r1-distill-llama-70b",
 }
 
-HF_STT_MODELS = {
-    "Whisper Small": "openai/whisper-small",
-    "Whisper Base": "openai/whisper-base",
+# Free Hugging Face image generation models
+HF_IMAGE_MODELS = {
+    "Stable Diffusion XL":   "stabilityai/stable-diffusion-xl-base-1.0",
+    "Stable Diffusion 2.1":  "stabilityai/stable-diffusion-2-1",
+    "Dreamlike Photoreal 2": "dreamlike-art/dreamlike-photoreal-2.0",
 }
 
-HF_IMAGE_ANALYZER_MODELS = {
-    "BLIP Large Captioning": "Salesforce/blip-image-captioning-large",
-    "BLIP Base Captioning": "Salesforce/blip-image-captioning-base",
-}
-
-HF_IMAGE_GENERATION_MODELS = {
-    "Stable Diffusion XL": "stabilityai/stable-diffusion-xl-base-1.0",
-    "Stable Diffusion 2.1": "stabilityai/stable-diffusion-2-1",
+LANGUAGES = {
+    "English":  "Always respond in English.",
+    "Hindi":    "Hamesha Hindi mein jawab do.",
+    "Hinglish": "Hinglish mein jawab do — Hindi aur English mix karke.",
+    "Marathi":  "Marathi madhe uttar dya.",
 }
 
 IMAGE_STYLES = {
-    "Natural": "",
-    "Realistic": ", realistic, highly detailed, natural lighting",
-    "Anime": ", anime style, vibrant, expressive",
-    "Oil Painting": ", oil painting, visible brush strokes",
-    "Watercolor": ", watercolor, soft colors",
-    "Cyberpunk": ", cyberpunk, neon, futuristic",
-    "Sketch": ", pencil sketch, clean linework",
-}
-
-LANGUAGE_RULES = {
-    "English": "Reply in English.",
-    "Hindi": "Reply in Hindi.",
-    "Hinglish": "Reply in Hinglish, mixing Hindi and English naturally.",
-    "Marathi": "Reply in Marathi.",
-}
-
-WEATHER_CODES = {
-    0: "Clear sky",
-    1: "Mainly clear",
-    2: "Partly cloudy",
-    3: "Overcast",
-    45: "Fog",
-    48: "Depositing rime fog",
-    51: "Light drizzle",
-    53: "Moderate drizzle",
-    55: "Dense drizzle",
-    61: "Slight rain",
-    63: "Moderate rain",
-    65: "Heavy rain",
-    71: "Slight snow",
-    73: "Moderate snow",
-    75: "Heavy snow",
-    80: "Slight rain showers",
-    81: "Moderate rain showers",
-    82: "Violent rain showers",
-    95: "Thunderstorm",
-    96: "Thunderstorm with slight hail",
-    99: "Thunderstorm with heavy hail",
+    "None":          "",
+    "Realistic":     ", ultra realistic, photographic, 8k",
+    "Anime":         ", anime style, vibrant, Studio Ghibli",
+    "Oil Painting":  ", oil painting, detailed brushwork",
+    "Cyberpunk":     ", cyberpunk, neon lights, futuristic",
+    "Watercolor":    ", watercolor, soft colors, artistic",
+    "Sketch":        ", pencil sketch, hand drawn",
 }
 
 
-def get_hf_token() -> str:
-    token = ""
+# ── HELPER: GROQ (text AI) ─────────────────────────────────────────────────────
+
+def call_groq(messages, model, temperature=0.7, max_tokens=1000):
+    """Send messages to Groq and return reply string."""
     try:
-        token = st.secrets.get("HF_TOKEN", "")
+        api_key = st.secrets["GROQ_API_KEY"]
     except Exception:
-        token = ""
-    return token or os.getenv("HF_TOKEN", "")
+        return "❌ GROQ_API_KEY missing. Add it in Streamlit Settings → Secrets."
 
-
-def hf_headers() -> Dict[str, str]:
-    token = get_hf_token()
-    headers = {}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    return headers
-
-
-def get_hf_api_bases() -> List[str]:
-    custom_base = ""
     try:
-        custom_base = st.secrets.get("HF_API_BASE", "")
+        res = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens},
+            timeout=30,
+        )
+        data = res.json()
+        if "choices" in data:
+            return data["choices"][0]["message"]["content"]
+        elif "error" in data:
+            return f"❌ Groq Error: {data['error']['message']}"
+        return f"❌ Unexpected response: {data}"
+    except requests.exceptions.Timeout:
+        return "⏱ Request timed out. Please try again."
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
+
+
+# ── HELPER: HF IMAGE GENERATION ───────────────────────────────────────────────
+
+def generate_image_hf(prompt, model_id):
+    """Call Hugging Face Inference API. Returns PIL Image or None."""
+    try:
+        hf_token = st.secrets["HF_TOKEN"]
     except Exception:
-        custom_base = ""
-    custom_base = custom_base or os.getenv("HF_API_BASE", "")
+        st.error("❌ HF_TOKEN missing. Add your Hugging Face token in Streamlit Secrets.")
+        return None
 
-    bases = []
-    if custom_base:
-        bases.append(custom_base.rstrip("/"))
-
-    # New Hugging Face serverless inference route, then legacy route as fallback.
-    bases.extend(
-        [
-            "https://router.huggingface.co/hf-inference/models",
-            "https://api-inference.huggingface.co/models",
-        ]
-    )
-    return list(dict.fromkeys(bases))
-
-
-def call_hf_api(
-    model: str,
-    payload: Any,
-    *,
-    task: str,
-    timeout: int = 60,
-    binary: bool = False,
-    content_type: Optional[str] = None,
-) -> Any:
-    headers = hf_headers()
-    if content_type:
-        headers["Content-Type"] = content_type
-    last_error = None
-
-    for base in get_hf_api_bases():
-        url = f"{base}/{model}"
-        try:
-            response = requests.post(
-                url,
-                headers=headers,
-                json=None if binary else payload,
-                data=payload if binary else None,
-                timeout=timeout,
-            )
-
-            if response.status_code == 503:
-                try:
-                    message = response.json().get("error", "Model is loading. Try again in a minute.")
-                except Exception:
-                    message = "Model is loading. Try again in a minute."
-                raise RuntimeError(message)
-
-            if not response.ok:
-                try:
-                    error_text = response.json().get("error", response.text)
-                except Exception:
-                    error_text = response.text
-                raise RuntimeError(f"{task} failed from {base}: {error_text}")
-
-            content_type_header = response.headers.get("content-type", "")
-            if content_type_header.startswith("image/"):
-                return response.content
-            if content_type_header.startswith("audio/"):
-                return response.content
-            return response.json()
-        except (requests.exceptions.RequestException, RuntimeError) as exc:
-            last_error = exc
-            continue
-
-    raise RuntimeError(
-        "Could not reach Hugging Face from this Streamlit server. "
-        "Check internet access, DNS, and Streamlit Cloud outbound network settings. "
-        f"Last error: {last_error}"
-    )
-
-
-def build_chat_prompt(messages: List[Dict[str, str]], system_prompt: str) -> str:
-    prompt = f"<|system|>\n{system_prompt}</s>\n"
-    for message in messages[-12:]:
-        role = message["role"]
-        content = message["content"]
-        if role == "user":
-            prompt += f"<|user|>\n{content}</s>\n"
+    url = f"https://api-inference.huggingface.co/models/{model_id}"
+    try:
+        res = requests.post(
+            url,
+            headers={"Authorization": f"Bearer {hf_token}"},
+            json={"inputs": prompt},
+            timeout=60,
+        )
+        if res.status_code == 200:
+            return Image.open(BytesIO(res.content))
+        elif res.status_code == 503:
+            st.warning("⏳ Model is loading on Hugging Face — wait 20 seconds and try again.")
         else:
-            prompt += f"<|assistant|>\n{content}</s>\n"
-    prompt += "<|assistant|>\n"
-    return prompt
+            st.error(f"❌ HF Error {res.status_code}: {res.text[:200]}")
+        return None
+    except Exception as e:
+        st.error(f"❌ Image generation failed: {e}")
+        return None
 
 
-def clean_generated_reply(text: str) -> str:
-    markers = ["<|assistant|>", "Assistant:", "</s>"]
-    reply = text
-    for marker in markers:
-        if marker in reply:
-            reply = reply.split(marker)[-1]
-    return reply.strip()
+# ── HELPER: HF IMAGE CAPTIONING (BLIP) ────────────────────────────────────────
 
-
-def chat_with_hugging_face(
-    messages: List[Dict[str, str]],
-    model: str,
-    system_prompt: str,
-    temperature: float,
-    max_new_tokens: int,
-) -> str:
-    prompt = build_chat_prompt(messages, system_prompt)
-    data = call_hf_api(
-        model,
-        {
-            "inputs": prompt,
-            "parameters": {
-                "max_new_tokens": max_new_tokens,
-                "temperature": temperature,
-                "return_full_text": False,
-            },
-            "options": {"wait_for_model": True},
-        },
-        task="Chat",
-        timeout=120,
-    )
-
-    if isinstance(data, list) and data:
-        text = data[0].get("generated_text", "")
-        return clean_generated_reply(text) or "I could not generate a response."
-    if isinstance(data, dict):
-        return clean_generated_reply(data.get("generated_text", str(data)))
-    return str(data)
-
-
-def transcribe_audio(audio_bytes: bytes, model: str) -> str:
-    data = call_hf_api(
-        model,
-        audio_bytes,
-        task="Speech to text",
-        timeout=120,
-        binary=True,
-        content_type="audio/wav",
-    )
-    if isinstance(data, dict):
-        return data.get("text", "").strip()
-    return str(data).strip()
-
-
-def speak_text_browser(text: str, language: str) -> None:
-    lang_codes = {
-        "English": "en-US",
-        "Hindi": "hi-IN",
-        "Hinglish": "hi-IN",
-        "Marathi": "mr-IN",
-    }
-    safe_text = text[:1200].replace("`", "").replace("\n", " ")
-    lang = lang_codes.get(language, "en-US")
-    components.html(
-        f"""
-        <script>
-        (function() {{
-          const utterance = new SpeechSynthesisUtterance({safe_text!r});
-          utterance.lang = {lang!r};
-          utterance.rate = 1.0;
-          window.speechSynthesis.cancel();
-          window.speechSynthesis.speak(utterance);
-        }})();
-        </script>
-        """,
-        height=0,
-    )
-
-
-def extract_pdf_text(uploaded_file) -> str:
-    if PyPDF2 is None:
-        return "PyPDF2 is not installed. Run: pip install PyPDF2"
+def analyze_image_hf(image: Image.Image) -> str:
+    """Use HF BLIP to caption an image. Returns string."""
     try:
-        reader = PyPDF2.PdfReader(io.BytesIO(uploaded_file.getvalue()))
-        text = "\n".join(page.extract_text() or "" for page in reader.pages)
-        return text.strip()
-    except Exception as exc:
-        return f"Could not read PDF: {exc}"
+        hf_token = st.secrets["HF_TOKEN"]
+    except Exception:
+        return "❌ HF_TOKEN missing."
 
+    buf = BytesIO()
+    image.save(buf, format="PNG")
 
-def extract_docx_text(uploaded_file) -> str:
-    if docx is None:
-        return "python-docx is not installed. Run: pip install python-docx"
     try:
-        document = docx.Document(io.BytesIO(uploaded_file.getvalue()))
-        return "\n".join(paragraph.text for paragraph in document.paragraphs).strip()
-    except Exception as exc:
-        return f"Could not read DOCX: {exc}"
+        res = requests.post(
+            "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-large",
+            headers={"Authorization": f"Bearer {hf_token}"},
+            data=buf.getvalue(),
+            timeout=30,
+        )
+        if res.status_code == 200:
+            result = res.json()
+            if isinstance(result, list) and result:
+                return result[0].get("generated_text", "No caption returned.")
+            return str(result)
+        elif res.status_code == 503:
+            return "⏳ Vision model is loading. Try again in 20 seconds."
+        return f"❌ HF Error {res.status_code}: {res.text[:200]}"
+    except Exception as e:
+        return f"❌ Error: {e}"
 
 
-def extract_document_text(uploaded_file) -> str:
-    name = uploaded_file.name.lower()
-    if name.endswith(".pdf"):
-        return extract_pdf_text(uploaded_file)
-    if name.endswith(".docx"):
-        return extract_docx_text(uploaded_file)
-    if name.endswith((".txt", ".md", ".csv")):
-        return uploaded_file.getvalue().decode("utf-8", errors="ignore").strip()
-    return "Unsupported document type."
+# ── HELPER: PDF TEXT EXTRACTION ────────────────────────────────────────────────
+
+def extract_pdf_text(pdf_file) -> str:
+    """Read PDF and return extracted text (max 8000 chars)."""
+    try:
+        reader = PyPDF2.PdfReader(io.BytesIO(pdf_file.read()))
+        text = "".join(page.extract_text() or "" for page in reader.pages)
+        return text[:8000]
+    except Exception as e:
+        return f"ERROR: {e}"
 
 
-def analyze_image_caption(image: Image.Image, model: str) -> str:
-    buffer = io.BytesIO()
-    image.convert("RGB").save(buffer, format="JPEG")
-    data = call_hf_api(
-        model,
-        buffer.getvalue(),
-        task="Image analysis",
-        timeout=120,
-        binary=True,
-        content_type="image/jpeg",
-    )
-    if isinstance(data, list) and data:
-        return data[0].get("generated_text", str(data[0]))
-    if isinstance(data, dict):
-        return data.get("generated_text", data.get("caption", str(data)))
-    return str(data)
-
-
-def generate_image(prompt: str, model: str) -> bytes:
-    return call_hf_api(
-        model,
-        {"inputs": prompt, "options": {"wait_for_model": True}},
-        task="Image generation",
-        timeout=180,
-    )
-
-
-def pollinations_image_url(prompt: str) -> str:
-    import random
-    import urllib.parse
-
-    encoded_prompt = urllib.parse.quote(prompt)
-    seed = random.randint(1, 999999)
-    return f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=768&height=768&nologo=true&seed={seed}"
-
-
-def get_weather(city: str, unit: str) -> Dict[str, Any]:
-    geo_url = "https://geocoding-api.open-meteo.com/v1/search"
-    geo = requests.get(
-        geo_url,
-        params={"name": city.strip(), "count": 1, "language": "en", "format": "json"},
-        timeout=20,
-    ).json()
-
-    if not geo.get("results"):
-        raise ValueError(f"City '{city}' was not found. Try adding the country name.")
-
-    location = geo["results"][0]
-    temperature_unit = "fahrenheit" if unit == "Fahrenheit" else "celsius"
-    weather = requests.get(
-        "https://api.open-meteo.com/v1/forecast",
-        params={
-            "latitude": location["latitude"],
-            "longitude": location["longitude"],
-            "current": "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m",
-            "current_weather": "true",
-            "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max",
-            "temperature_unit": temperature_unit,
-            "wind_speed_unit": "kmh",
-            "forecast_days": 5,
-            "timezone": "auto",
-        },
-        timeout=20,
-    ).json()
-
-    current = weather.get("current") or {}
-    current_weather = weather.get("current_weather") or {}
-
-    if current_weather:
-        current.setdefault("temperature_2m", current_weather.get("temperature"))
-        current.setdefault("apparent_temperature", current_weather.get("temperature"))
-        current.setdefault("weather_code", current_weather.get("weathercode"))
-        current.setdefault("wind_speed_10m", current_weather.get("windspeed"))
-
-    daily = weather.get("daily", {})
-    return {
-        "place": f"{location.get('name', city)}, {location.get('country', '')}",
-        "current": current,
-        "daily": daily,
-        "condition": WEATHER_CODES.get(current.get("weather_code"), "Unknown"),
-        "unit": "F" if unit == "Fahrenheit" else "C",
-    }
-
-
-def init_state() -> None:
-    st.session_state.setdefault("messages", [])
-    st.session_state.setdefault("document_context", "")
-    st.session_state.setdefault("document_name", "")
-
-
-init_state()
-
+# ── SIDEBAR ────────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    st.title("Aura AI")
-    st.caption("Streamlit app powered by Hugging Face models")
+    st.title("✨ Aura AI")
+    st.caption("Built by Rupal Darode")
     st.divider()
 
-    feature = st.radio(
-        "Features",
-        [
-            "Conversational Chatbot",
-            "Document Upload",
-            "PDF Analyzer",
-            "Image Analyzer",
-            "Image Generation",
-            "Weather Forecasting",
-        ],
-    )
+    feature = st.selectbox("Choose a feature", [
+        "💬 AI Chat",
+        "🎨 Image Generator",
+        "🖼 Image Analyzer",
+        "🌤 Weather",
+        "💻 Code Assistant",
+    ])
 
     st.divider()
-    chat_model_name = st.selectbox("Chat model", list(HF_CHAT_MODELS.keys()))
-    chat_model = HF_CHAT_MODELS[chat_model_name]
-    language = st.selectbox("Response language", list(LANGUAGE_RULES.keys()))
-    temperature = st.slider("Creativity", 0.1, 1.0, 0.7, 0.1)
-    max_tokens = st.slider("Max answer length", 100, 1200, 500, 50)
 
-    st.divider()
-    if get_hf_token():
-        st.success("HF_TOKEN loaded")
+    # Show model/language settings only for chat-based features
+    is_chat = any(x in feature for x in ["Chat", "Code"])
+
+    if is_chat:
+        model_name  = st.selectbox("Model", list(GROQ_MODELS.keys()))
+        model_id    = GROQ_MODELS[model_name]
+        language    = st.selectbox("Language", list(LANGUAGES.keys()))
+        lang_rule   = LANGUAGES[language]
+        temperature = st.slider("Creativity", 0.1, 1.0, 0.7)
+        max_tokens  = st.slider("Max Tokens", 100, 4000, 1000)
+
+        if st.button("🗑 Clear Chat"):
+            st.session_state.pop("messages", None)
+            st.session_state.pop("pdf_context", None)
+            st.rerun()
+
+        if st.session_state.get("messages"):
+            lines = [
+                f"{'You' if m['role'] == 'user' else 'Aura'}: {m['content']}"
+                for m in st.session_state.messages
+                if isinstance(m["content"], str)
+            ]
+            st.download_button(
+                "📥 Export Chat", "\n\n".join(lines),
+                file_name=f"aura_chat_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
+                mime="text/plain",
+            )
     else:
-        st.warning("Add HF_TOKEN in Streamlit secrets for best results.")
+        # Safe defaults so variables exist throughout the script
+        model_id    = GROQ_MODELS["⚡ Llama 3.1 8B  — Fast"]
+        lang_rule   = LANGUAGES["English"]
+        temperature = 0.7
+        max_tokens  = 1000
 
-    if st.button("Clear chat and document", use_container_width=True):
+
+# ── FEATURE 1: AI CHAT (with PDF attachment + voice) ──────────────────────────
+
+if "AI Chat" in feature:
+    st.header("💬 AI Chat")
+    if is_chat:
+        st.caption(f"Model: {model_name}  |  Language: {language}")
+
+    # ── Message history ─────────────────────────────────────────────
+    if "messages" not in st.session_state:
         st.session_state.messages = []
-        st.session_state.document_context = ""
-        st.session_state.document_name = ""
-        st.rerun()
 
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            content = msg["content"]
+            if isinstance(content, str):
+                st.markdown(content)
 
-def document_context_note() -> str:
-    if not st.session_state.document_context:
-        return ""
-    clipped = st.session_state.document_context[:7000]
-    return (
-        f"\n\nThe user uploaded this document named {st.session_state.document_name}. "
-        f"Use it when relevant:\n---\n{clipped}\n---"
-    )
+    # ── PDF badge (shown when a PDF is attached) ────────────────────
+    if st.session_state.get("pdf_context"):
+        pdf_name = st.session_state.get("pdf_name", "document.pdf")
+        st.markdown(f'<div class="attach-badge">📄 {pdf_name} — PDF loaded</div>', unsafe_allow_html=True)
 
+    # ── Compact input row: [📎] [🎤 mic widget] [──── chat input ────] ──
+    # The mic widget is a tiny inline HTML component — just the icon button.
+    # When clicked: it records → shows transcript inside the widget →
+    # user clicks ✅ → text drops into the voice_text box below →
+    # pressing Enter sends it. TTS reads replies aloud automatically.
 
-if feature == "Conversational Chatbot":
-    st.header("Conversational Chatbot")
-    st.caption("Type, upload a document for context, or speak into the microphone.")
+    left_col, right_col = st.columns([2.2, 8])
 
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    with left_col:
+        # Single HTML component holds BOTH 📎 and 🎤 as small icon buttons
+        # side by side — compact, no extra rows
+        components.html("""
+<style>
+  body { margin:0; padding:0; background:transparent; }
+  .bar {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 0;
+  }
+  .icon-btn {
+    width: 36px; height: 36px; border-radius: 50%;
+    border: 1px solid #e5e7eb; background: #f9fafb;
+    font-size: 16px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s;
+  }
+  .icon-btn:hover { background: #f3f4f6; }
+  .icon-btn.listening { background: #fee2e2; animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.13)} }
+  .tooltip {
+    font-size: 11px; color: #9ca3af;
+    white-space: nowrap; display: none;
+  }
+  .bar:has(#mic-btn.listening) .tooltip { display: inline; color: #ef4444; }
+</style>
 
-    if st.session_state.document_context:
-        st.info(f"Document context loaded: {st.session_state.document_name}")
+<div class="bar">
 
-    upload_col, voice_col = st.columns([2, 1])
-    with upload_col:
-        chat_doc = st.file_uploader(
-            "Attach document context",
-            type=["pdf", "docx", "txt", "md", "csv"],
-            key="chat_document",
-        )
-    with voice_col:
-        stt_model_name = st.selectbox("Voice model", list(HF_STT_MODELS.keys()))
-        if hasattr(st, "audio_input"):
-            voice_file = st.audio_input("Voice to text")
-        else:
-            voice_file = st.file_uploader("Upload voice audio", type=["wav", "mp3", "m4a"], key="voice_upload")
+  <!-- 📎 PDF button — triggers file input -->
+  <label for="pdf-input" class="icon-btn" title="Attach PDF">📎</label>
+  <input id="pdf-input" type="file" accept=".pdf"
+         style="display:none"
+         onchange="sendPdf(this)">
 
-    if chat_doc is not None and st.session_state.document_name != chat_doc.name:
-        text = extract_document_text(chat_doc)
-        if text:
-            st.session_state.document_context = text
-            st.session_state.document_name = chat_doc.name
-            st.success(f"Loaded {chat_doc.name}")
+  <!-- 🎤 Mic button -->
+  <button id="mic-btn" class="icon-btn" title="Speak a message">🎤</button>
 
-    voice_text = ""
-    if voice_file is not None:
-        audio_bytes = voice_file.read()
-        audio_hash = hash(audio_bytes)
-        if st.session_state.get("last_audio_hash") != audio_hash:
-            st.session_state.last_audio_hash = audio_hash
-            with st.spinner("Converting voice to text..."):
-                try:
-                    voice_text = transcribe_audio(audio_bytes, HF_STT_MODELS[stt_model_name])
-                    if voice_text:
-                        st.success(f"Voice text: {voice_text}")
-                except Exception as exc:
-                    st.error("Voice-to-text could not reach Hugging Face from this Streamlit server.")
-                    with st.expander("Technical Hugging Face error"):
-                        st.code(str(exc))
+  <span class="tooltip" id="tip">Listening…</span>
+</div>
 
-    typed_text = st.chat_input("Type your message here...")
-    user_text = typed_text or voice_text
+<script>
+// ── PDF: read file → send base64 to Streamlit via postMessage ───
+function sendPdf(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    window.parent.postMessage({
+      type: 'pdf_upload',
+      name: file.name,
+      data: reader.result   // data:application/pdf;base64,...
+    }, '*');
+  };
+  reader.readAsDataURL(file);
+}
 
-    if user_text:
-        st.session_state.messages.append({"role": "user", "content": user_text})
+// ── Mic: Web Speech API ─────────────────────────────────────────
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const micBtn = document.getElementById('mic-btn');
+const tip    = document.getElementById('tip');
+
+if (!SR) {
+  micBtn.title = 'Not supported — use Chrome';
+  micBtn.style.opacity = '0.4';
+} else {
+  const rec = new SR();
+  rec.lang           = 'en-US';
+  rec.interimResults = true;
+  rec.continuous     = false;
+
+  let finalText = '';
+
+  rec.onstart  = () => { micBtn.classList.add('listening'); micBtn.textContent='⏹'; finalText=''; };
+  rec.onresult = (e) => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      e.results[i].isFinal ? finalText += t : interim += t;
+    }
+    tip.textContent = finalText || interim;
+    tip.style.display = 'inline';
+  };
+  rec.onend = () => {
+    micBtn.classList.remove('listening');
+    micBtn.textContent = '🎤';
+    if (finalText.trim()) {
+      window.parent.postMessage({ type: 'voice_transcript', text: finalText.trim() }, '*');
+      tip.textContent = '✅ Sent!';
+      setTimeout(() => { tip.style.display='none'; tip.textContent='Listening…'; }, 1500);
+    } else {
+      tip.style.display = 'none';
+    }
+  };
+  rec.onerror = (e) => {
+    micBtn.classList.remove('listening');
+    micBtn.textContent = '🎤';
+    tip.textContent = '❌ ' + e.error;
+    tip.style.display = 'inline';
+  };
+
+  micBtn.addEventListener('click', () => {
+    micBtn.classList.contains('listening') ? rec.stop() : rec.start();
+  });
+}
+
+// ── TTS: speak Aura's reply when Streamlit sends it ────────────
+window.addEventListener('message', (e) => {
+  if (e.data?.type === 'tts' && e.data.text) {
+    const u = new SpeechSynthesisUtterance(e.data.text);
+    u.lang = 'en-US'; u.rate = 1.0;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  }
+});
+</script>
+""", height=48)
+
+    with right_col:
+        user_input = st.chat_input("Type or use the mic…")
+
+    # Voice transcript arrives as a query param written by postMessage.
+    # We capture it with a hidden text_input that the JS widget fills.
+    voice_text = st.text_input("voice", key="voice_input_box",
+                               label_visibility="collapsed",
+                               placeholder="Voice transcript appears here — press Enter to send")
+
+    # PDF uploader triggered by 📎 click (postMessage can't directly trigger
+    # Streamlit file dialogs, so we keep a fallback native uploader hidden
+    # behind a toggle — the HTML label+input above handles it in-browser)
+    if st.session_state.get("show_pdf_uploader"):
+        pdf_file = st.file_uploader("PDF", type=["pdf"],
+                                    label_visibility="collapsed", key="pdf_uploader")
+        if pdf_file and st.session_state.get("pdf_name") != pdf_file.name:
+            with st.spinner("Reading PDF..."):
+                text = extract_pdf_text(pdf_file)
+            if not text.startswith("ERROR"):
+                st.session_state.pdf_context       = text
+                st.session_state.pdf_name          = pdf_file.name
+                st.session_state.show_pdf_uploader = False
+                st.rerun()
+            else:
+                st.error(text)
+
+    # Pick whichever input arrived — typed chat takes priority over voice box
+    final_input = user_input or (voice_text.strip() if voice_text else None)
+
+    if final_input:
+        st.session_state.messages.append({"role": "user", "content": final_input})
         with st.chat_message("user"):
-            st.markdown(user_text)
+            st.markdown(final_input)
 
-        system_prompt = (
-            "You are Aura AI, a helpful conversational assistant. "
-            "Answer clearly and practically. "
-            f"{LANGUAGE_RULES[language]}"
-            f"{document_context_note()}"
-        )
+        # Build system prompt — include PDF if attached
+        system = f"You are Aura, a helpful and friendly AI assistant. {lang_rule}"
+        if st.session_state.get("pdf_context"):
+            system += (
+                f"\n\nThe user has attached a PDF. Answer questions based on it:\n\n"
+                f"---\n{st.session_state.pdf_context}\n---\n"
+                f"If the answer is not in the PDF, say so."
+            )
+
+        full_messages = [{"role": "system", "content": system}] + [
+            {"role": m["role"], "content": m["content"]}
+            for m in st.session_state.messages
+        ]
 
         with st.chat_message("assistant"):
-            with st.spinner("Thinking with Hugging Face..."):
-                try:
-                    reply = chat_with_hugging_face(
-                        st.session_state.messages,
-                        chat_model,
-                        system_prompt,
-                        temperature,
-                        max_tokens,
-                    )
-                except Exception as exc:
-                    reply = (
-                        "Sorry, I could not reach Hugging Face from this Streamlit server. "
-                        "Please check your HF_TOKEN secret and Streamlit Cloud network/DNS access."
-                    )
-                    with st.expander("Technical Hugging Face error"):
-                        st.code(str(exc))
+            with st.spinner("Thinking..."):
+                reply = call_groq(full_messages, model_id, temperature, max_tokens)
                 st.markdown(reply)
-                speak_text_browser(reply, language)
 
         st.session_state.messages.append({"role": "assistant", "content": reply})
 
-    if st.session_state.messages:
-        export_text = "\n\n".join(f"{m['role'].title()}: {m['content']}" for m in st.session_state.messages)
-        st.download_button(
-            "Download chat",
-            export_text,
-            file_name=f"aura_chat_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
-            mime="text/plain",
-        )
+        # ── Text-to-Speech: send reply to the voice widget to read aloud ──
+        # We inject a tiny script that posts the reply text to our iframe
+        tts_script = f"""
+        <script>
+        // Find our voice component iframe and send it the reply text
+        const iframes = window.parent.document.querySelectorAll('iframe');
+        iframes.forEach(iframe => {{
+            try {{
+                iframe.contentWindow.postMessage({{
+                    type: 'tts',
+                    text: {repr(reply[:500])}
+                }}, '*');
+            }} catch(e) {{}}
+        }});
+        </script>
+        """
+        components.html(tts_script, height=0)
 
 
-elif feature == "Document Upload":
-    st.header("Document Upload")
-    st.caption("Upload PDF, DOCX, TXT, MD, or CSV files and ask questions about them.")
+# ── FEATURE 2: IMAGE GENERATOR (Hugging Face) ─────────────────────────────────
 
-    uploaded = st.file_uploader("Upload a document", type=["pdf", "docx", "txt", "md", "csv"])
-    if uploaded:
-        text = extract_document_text(uploaded)
-        st.session_state.document_context = text
-        st.session_state.document_name = uploaded.name
-        st.success(f"Loaded {uploaded.name}")
-        st.text_area("Extracted text", value=text[:10000], height=280)
+elif "Image Generator" in feature:
+    st.header("🎨 Image Generator")
+    st.caption("Powered by Hugging Face — needs HF_TOKEN in secrets")
 
-        question = st.text_input("Ask about this document", placeholder="Summarize this document in 5 points")
-        if st.button("Analyze document", use_container_width=True) and question.strip():
-            prompt = (
-                "You are a document analysis assistant. Use the document text to answer. "
-                f"{LANGUAGE_RULES[language]}\n\nDocument:\n{text[:9000]}"
-            )
-            with st.spinner("Analyzing document..."):
-                try:
-                    answer = chat_with_hugging_face(
-                        [{"role": "user", "content": question}],
-                        chat_model,
-                        prompt,
-                        temperature,
-                        max_tokens,
-                    )
-                    st.markdown(answer)
-                except Exception as exc:
-                    st.error(str(exc))
+    prompt = st.text_area("Describe your image", placeholder="A sunset over Mumbai skyline, golden hour...")
 
+    col1, col2 = st.columns(2)
+    style     = col1.selectbox("Style", list(IMAGE_STYLES.keys()))
+    hf_model  = col2.selectbox("Model", list(HF_IMAGE_MODELS.keys()))
 
-elif feature == "PDF Analyzer":
-    st.header("PDF Analyzer")
-    st.caption("Extract, summarize, and question-answer over a PDF.")
-
-    pdf_file = st.file_uploader("Upload PDF", type=["pdf"])
-    if pdf_file:
-        pdf_text = extract_pdf_text(pdf_file)
-        st.session_state.document_context = pdf_text
-        st.session_state.document_name = pdf_file.name
-        st.success(f"Loaded {pdf_file.name}")
-        st.text_area("PDF text preview", pdf_text[:10000], height=260)
-
-        action = st.selectbox("PDF task", ["Summarize", "Key points", "Find risks/issues", "Custom question"])
-        custom_question = ""
-        if action == "Custom question":
-            custom_question = st.text_input("Your question")
-
-        if st.button("Run PDF analysis", use_container_width=True):
-            question = custom_question or f"{action} this PDF."
-            system_prompt = (
-                "You are a precise PDF analyzer. Base your answer on the PDF text. "
-                f"{LANGUAGE_RULES[language]}\n\nPDF text:\n{pdf_text[:10000]}"
-            )
-            with st.spinner("Analyzing PDF..."):
-                try:
-                    answer = chat_with_hugging_face(
-                        [{"role": "user", "content": question}],
-                        chat_model,
-                        system_prompt,
-                        temperature,
-                        max_tokens,
-                    )
-                    st.markdown(answer)
-                except Exception as exc:
-                    st.error(str(exc))
-
-
-elif feature == "Image Analyzer":
-    st.header("Image Analyzer")
-    st.caption("Upload an image and analyze it with a Hugging Face vision model.")
-
-    image_model_name = st.selectbox("Image analyzer model", list(HF_IMAGE_ANALYZER_MODELS.keys()))
-    uploaded_image = st.file_uploader("Upload image", type=["png", "jpg", "jpeg", "webp"])
-    if uploaded_image:
-        image = Image.open(uploaded_image)
-        st.image(image, use_container_width=True)
-        question = st.text_input("Ask about the image", value="Describe this image in detail.")
-
-        if st.button("Analyze image", use_container_width=True):
-            with st.spinner("Analyzing image..."):
-                try:
-                    caption = analyze_image_caption(image, HF_IMAGE_ANALYZER_MODELS[image_model_name])
-                    st.subheader("Vision model result")
-                    st.markdown(caption)
-
-                    if question.strip() and question.lower() != "describe this image in detail.":
-                        system_prompt = (
-                            "You answer questions about images using the provided visual caption. "
-                            f"{LANGUAGE_RULES[language]}"
-                        )
-                        answer = chat_with_hugging_face(
-                            [{"role": "user", "content": f"Image caption: {caption}\nQuestion: {question}"}],
-                            chat_model,
-                            system_prompt,
-                            temperature,
-                            max_tokens,
-                        )
-                        st.subheader("Answer")
-                        st.markdown(answer)
-                except Exception as exc:
-                    st.error(str(exc))
-
-
-elif feature == "Image Generation":
-    st.header("Image Generation")
-    st.caption("Generate images from text using Hugging Face diffusion models.")
-
-    image_gen_model_name = st.selectbox("Image generation model", list(HF_IMAGE_GENERATION_MODELS.keys()))
-    prompt = st.text_area("Image prompt", placeholder="A peaceful mountain village at sunrise")
-    style = st.selectbox("Style", list(IMAGE_STYLES.keys()))
-
-    if st.button("Generate image", use_container_width=True):
+    if st.button("✨ Generate Image", use_container_width=True):
         if not prompt.strip():
-            st.warning("Please enter an image prompt.")
+            st.warning("Please enter a prompt first.")
         else:
-            full_prompt = prompt.strip() + IMAGE_STYLES[style]
-            with st.spinner("Generating image with Hugging Face..."):
-                try:
-                    image_bytes = generate_image(full_prompt, HF_IMAGE_GENERATION_MODELS[image_gen_model_name])
-                    st.image(image_bytes, caption=full_prompt, use_container_width=True)
-                    st.download_button(
-                        "Download image",
-                        image_bytes,
-                        file_name="aura_generated_image.png",
-                        mime="image/png",
-                    )
-                except Exception as exc:
-                    st.warning(
-                        "Hugging Face image generation could not be reached from the Streamlit server. "
-                        "Showing a browser-loaded fallback image instead."
-                    )
-                    st.markdown(
-                        f"""
-                        <div style="text-align:center">
-                          <img src="{pollinations_image_url(full_prompt)}"
-                               style="max-width:100%; border-radius:8px; border:1px solid #e5e7eb;" />
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-                    with st.expander("Technical Hugging Face error"):
-                        st.code(str(exc))
+            with st.spinner("Generating... (may take 20–40 seconds on first run)"):
+                image = generate_image_hf(prompt + IMAGE_STYLES[style], HF_IMAGE_MODELS[hf_model])
+                if image:
+                    st.image(image, use_container_width=True)
+                    buf = BytesIO()
+                    image.save(buf, format="PNG")
+                    st.download_button("⬇ Download Image", buf.getvalue(),
+                                       file_name="aura_image.png", mime="image/png",
+                                       use_container_width=True)
 
 
-elif feature == "Weather Forecasting":
-    st.header("Weather Forecasting")
-    st.caption("Current weather and 5-day forecast using Open-Meteo.")
+# ── FEATURE 3: IMAGE ANALYZER (HF BLIP + Groq) ────────────────────────────────
 
-    col_city, col_unit = st.columns([3, 1])
-    city = col_city.text_input("City", placeholder="Nagpur, Mumbai, Delhi, London")
-    unit = col_unit.selectbox("Unit", ["Celsius", "Fahrenheit"])
+elif "Image Analyzer" in feature:
+    st.header("🖼 Image Analyzer")
+    st.caption("Uses Hugging Face BLIP to read the image, then Groq to answer your question")
 
-    if st.button("Get forecast", use_container_width=True):
+    uploaded = st.file_uploader("Upload an image", type=["png", "jpg", "jpeg", "webp"])
+
+    if not uploaded:
+        st.info("Upload an image to get started.")
+    else:
+        image = Image.open(uploaded)
+        st.image(image, use_container_width=True)
+
+        st.markdown("**Quick actions:**")
+        c1, c2, c3, c4 = st.columns(4)
+        question = ""
+        if c1.button("📝 Describe"):  question = "Describe this image in detail."
+        if c2.button("🎨 Colors"):    question = "What are the main colors?"
+        if c3.button("😊 Mood"):      question = "What is the mood or emotion?"
+        if c4.button("📦 Objects"):   question = "List all objects in the image."
+
+        question = st.text_input("Or type your own question:", value=question,
+                                 placeholder="What is happening in this image?")
+
+        if st.button("🔍 Analyze", use_container_width=True):
+            if not question:
+                st.warning("Please enter a question.")
+            else:
+                with st.spinner("Step 1 — Reading image with BLIP vision model..."):
+                    caption = analyze_image_hf(image)   # real image understanding
+
+                with st.spinner("Step 2 — Generating detailed answer..."):
+                    messages = [
+                        {"role": "system", "content": "You are an expert image analyst. A vision model has described the image. Use that description to answer the user's question thoroughly."},
+                        {"role": "user",   "content": f"Vision model description: '{caption}'\n\nUser question: {question}"},
+                    ]
+                    reply = call_groq(messages, "llama-3.3-70b-versatile", 0.3, 1000)
+                    st.success(reply)
+                    st.caption(f"🤖 Raw vision caption: {caption}")
+
+
+# ── FEATURE 4: WEATHER ─────────────────────────────────────────────────────────
+
+elif "Weather" in feature:
+    st.header("🌤 Weather")
+    st.caption("Real-time weather — no API key needed")
+
+    col1, col2 = st.columns([3, 1])
+    city = col1.text_input("Enter a city name", placeholder="Nagpur, Mumbai, Delhi...")
+    unit = col2.selectbox("Unit", ["Celsius", "Fahrenheit"])
+
+    if st.button("Get Weather", use_container_width=True):
         if not city.strip():
-            st.warning("Please enter a city.")
+            st.warning("Please enter a city name.")
         else:
             with st.spinner("Fetching weather..."):
                 try:
-                    weather = get_weather(city, unit)
-                    current = weather["current"]
-                    unit_symbol = weather["unit"]
+                    # Step 1: Get coordinates for the city
+                    geo_data = requests.get(
+                        f"https://geocoding-api.open-meteo.com/v1/search?name={urllib.parse.quote(city)}&count=1",
+                        timeout=10,
+                    ).json()
 
-                    st.subheader(weather["place"])
-                    c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("Temperature", f"{current.get('temperature_2m', 'N/A')} deg {unit_symbol}")
-                    c2.metric("Feels like", f"{current.get('apparent_temperature', 'N/A')} deg {unit_symbol}")
-                    c3.metric("Humidity", f"{current.get('relative_humidity_2m', 'N/A')}%")
-                    c4.metric("Wind", f"{current.get('wind_speed_10m', 'N/A')} km/h")
-                    st.info(f"Condition: {weather['condition']}")
+                    if not geo_data.get("results"):
+                        st.error("City not found. Try a different spelling.")
+                    else:
+                        loc        = geo_data["results"][0]
+                        lat, lon   = loc["latitude"], loc["longitude"]
+                        city_name  = loc.get("name", city)
+                        country    = loc.get("country", "")
+                        unit_param = "celsius" if unit == "Celsius" else "fahrenheit"
+                        unit_sym   = "°C" if unit == "Celsius" else "°F"
 
-                    daily = weather["daily"]
-                    if daily:
-                        st.subheader("5-day forecast")
-                        rows = []
-                        for index, day in enumerate(daily.get("time", [])):
-                            rows.append(
-                                {
-                                    "Date": day,
-                                    f"Max ({unit_symbol})": daily.get("temperature_2m_max", [])[index],
-                                    f"Min ({unit_symbol})": daily.get("temperature_2m_min", [])[index],
-                                    "Rain chance (%)": daily.get("precipitation_probability_max", [])[index],
-                                }
-                            )
-                        st.table(rows)
+                        # Step 2: Fetch weather — use 'current_weather' (not 'current')
+                        # Also fetch hourly humidity and feels-like for the current hour
+                        w_data = requests.get(
+                            f"https://api.open-meteo.com/v1/forecast?"
+                            f"latitude={lat}&longitude={lon}"
+                            f"&current_weather=true"
+                            f"&hourly=relativehumidity_2m,apparent_temperature"
+                            f"&temperature_unit={unit_param}&forecast_days=1",
+                            timeout=10,
+                        ).json()
 
-                    with st.spinner("Creating AI weather tip..."):
-                        prompt = (
-                            f"Weather for {weather['place']}: {current}. "
-                            "Give a short practical clothing and travel tip."
-                        )
-                        try:
-                            tip = chat_with_hugging_face(
-                                [{"role": "user", "content": prompt}],
-                                chat_model,
-                                f"You are a weather assistant. {LANGUAGE_RULES[language]}",
-                                0.4,
-                                180,
-                            )
-                            st.markdown(f"**AI tip:** {tip}")
-                        except Exception:
-                            pass
-                except Exception as exc:
-                    st.error(str(exc))
+                        # 'current_weather' is the top-level key returned by this API
+                        cw       = w_data.get("current_weather", {})
+                        temp     = cw.get("temperature", "N/A")
+                        wind     = cw.get("windspeed", "N/A")
+                        wmo_code = cw.get("weathercode", 0)
+
+                        # Hourly arrays — index 0 is the first hour of today
+                        hourly   = w_data.get("hourly", {})
+                        humidity = hourly.get("relativehumidity_2m", ["N/A"])[0]
+                        feels    = hourly.get("apparent_temperature",  ["N/A"])[0]
+
+                        # WMO weather code → emoji label
+                        code_map = {
+                            0: "☀️ Clear sky",      1: "🌤 Mainly clear",   2: "⛅ Partly cloudy",
+                            3: "☁️ Overcast",       45: "🌫 Foggy",         48: "🌫 Icy fog",
+                            51: "🌦 Light drizzle", 61: "🌧 Light rain",    63: "🌧 Moderate rain",
+                            65: "🌧 Heavy rain",    71: "🌨 Light snow",    80: "🌦 Rain showers",
+                            95: "⛈ Thunderstorm",
+                        }
+                        condition = code_map.get(wmo_code, "🌡 Unknown")
+
+                        st.subheader(f"{city_name}, {country}")
+                        m1, m2, m3, m4 = st.columns(4)
+                        m1.metric("Temperature", f"{temp}{unit_sym}", f"Feels {feels}{unit_sym}")
+                        m2.metric("Humidity",    f"{humidity}%")
+                        m3.metric("Wind Speed",  f"{wind} km/h")
+                        m4.metric("Condition",   condition)
+
+                        with st.spinner("Getting AI tip..."):
+                            tip = call_groq([
+                                {"role": "system", "content": "Helpful weather assistant. Give a practical 2-line tip."},
+                                {"role": "user",   "content": f"Weather in {city_name}: {temp}{unit_sym}, {condition}, humidity {humidity}%. What should I wear or do?"},
+                            ], "llama-3.1-8b-instant", 0.7, 200)
+                            st.info(f"💡 AI Tip: {tip}")
+
+                except Exception as e:
+                    st.error(f"Something went wrong: {e}")
+
+
+# ── FEATURE 5: CODE ASSISTANT ──────────────────────────────────────────────────
+
+elif "Code" in feature:
+    st.header("💻 Code Assistant")
+    st.caption("Write, debug, explain, and convert code")
+
+    action = st.selectbox("What do you need?", [
+        "✍️ Write code for me",
+        "🐛 Debug my code",
+        "📖 Explain this code",
+        "🔄 Convert to another language",
+        "⚡ Optimize my code",
+        "🧪 Write tests for my code",
+    ])
+
+    col1, col2 = st.columns(2)
+    lang        = col1.selectbox("Language", ["Python", "JavaScript", "Java", "C++", "SQL", "HTML/CSS", "React", "Other"])
+    target_lang = col2.selectbox("Convert TO", ["Python", "JavaScript", "Java", "C++", "SQL", "HTML/CSS", "React", "Other"]) if "Convert" in action else None
+
+    user_code = st.text_area("Describe what you want or paste your code here", height=200,
+                             placeholder="e.g. Write a function to check if a number is prime")
+
+    if st.button("🚀 Run", use_container_width=True):
+        if not user_code.strip():
+            st.warning("Please enter some code or a description.")
+        else:
+            with st.spinner("Processing..."):
+                prompts = {
+                    "✍️ Write code for me":           f"Write clean, well-commented {lang} code for: {user_code}. Include example usage.",
+                    "🐛 Debug my code":               f"Debug this {lang} code and explain all issues:\n\n{user_code}",
+                    "📖 Explain this code":           f"Explain this {lang} code step by step in simple terms:\n\n{user_code}",
+                    "🔄 Convert to another language":  f"Convert this {lang} code to {target_lang}:\n\n{user_code}",
+                    "⚡ Optimize my code":            f"Optimize this {lang} code for better performance:\n\n{user_code}",
+                    "🧪 Write tests for my code":     f"Write comprehensive unit tests for this {lang} code:\n\n{user_code}",
+                }
+                messages = [
+                    {"role": "system", "content": "You are an expert programmer. Provide clean, working code with clear explanations. Use markdown code blocks."},
+                    {"role": "user",   "content": prompts[action]},
+                ]
+                reply = call_groq(messages, model_id, temperature=0.3, max_tokens=max_tokens)
+                st.markdown(reply)
+                st.download_button("📥 Download", reply, file_name="aura_code.txt", mime="text/plain")
