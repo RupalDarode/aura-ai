@@ -439,7 +439,8 @@ elif "Image Generator" in feature:
             with st.spinner("Generating your image… (takes ~15 seconds)"):
                 full_prompt = prompt + IMAGE_STYLES[style]
                 encoded = urllib.parse.quote(full_prompt)
-                url = f"https://image.pollinations.ai/prompt/{encoded}?width={w}&height={h}&seed=42&model=flux&nologo=true"
+                # Plain free URL — no nologo, no auth required
+                url = f"https://image.pollinations.ai/prompt/{encoded}?width={w}&height={h}&seed=42&model=flux"
                 try:
                     res = requests.get(url, timeout=90)
                     if res.status_code == 200 and "image" in res.headers.get("content-type", ""):
@@ -451,19 +452,7 @@ elif "Image Generator" in feature:
                                            file_name="aura_image.png", mime="image/png",
                                            use_container_width=True)
                     else:
-                        # Fallback: try without nologo param
-                        url2 = f"https://image.pollinations.ai/prompt/{encoded}?width={w}&height={h}&seed=42"
-                        res2 = requests.get(url2, timeout=90)
-                        if res2.status_code == 200:
-                            image = Image.open(BytesIO(res2.content))
-                            st.image(image, use_container_width=True)
-                            buf = BytesIO()
-                            image.save(buf, format="PNG")
-                            st.download_button("⬇ Download Image", buf.getvalue(),
-                                               file_name="aura_image.png", mime="image/png",
-                                               use_container_width=True)
-                        else:
-                            st.error(f"❌ Could not generate image (status {res.status_code}). Try a different prompt.")
+                        st.error(f"❌ Image service returned {res.status_code}. Try a shorter/simpler prompt.")
                 except Exception as e:
                     st.error(f"❌ Error: {e}")
 
@@ -524,54 +513,41 @@ elif "Weather" in feature:
         else:
             with st.spinner("Fetching weather..."):
                 try:
-                    # Step 1: city → lat/lon
-                    geo = requests.get(
-                        f"https://geocoding-api.open-meteo.com/v1/search"
-                        f"?name={urllib.parse.quote(city)}&count=1&language=en&format=json",
-                        timeout=10,
-                    ).json()
+                    # wttr.in — simple, reliable, no API key, works on Streamlit Cloud
+                    # Returns JSON with current weather for any city name
+                    unit_sym = "°C" if unit == "Celsius" else "°F"
+                    wttr_url = f"https://wttr.in/{urllib.parse.quote(city)}?format=j1"
+                    res = requests.get(wttr_url, timeout=15)
 
-                    if not geo.get("results"):
-                        st.error("City not found. Try a different spelling.")
+                    if res.status_code != 200:
+                        st.error(f"City not found or service unavailable. Try a different spelling.")
                     else:
-                        loc       = geo["results"][0]
-                        lat, lon  = loc["latitude"], loc["longitude"]
-                        city_name = loc.get("name", city)
-                        country   = loc.get("country", "")
-                        unit_p    = "celsius" if unit == "Celsius" else "fahrenheit"
-                        unit_sym  = "°C" if unit == "Celsius" else "°F"
+                        data = res.json()
+                        cc   = data["current_condition"][0]   # current conditions block
+                        area = data["nearest_area"][0]
 
-                        # Step 2: fetch weather
-                        # Use 'current' (new API) with explicit field names
-                        weather_url = (
-                            f"https://api.open-meteo.com/v1/forecast"
-                            f"?latitude={lat}&longitude={lon}"
-                            f"&current=temperature_2m,relative_humidity_2m,"
-                            f"apparent_temperature,weather_code,wind_speed_10m"
-                            f"&temperature_unit={unit_p}"
-                            f"&wind_speed_unit=kmh"
-                            f"&forecast_days=1"
-                        )
-                        w = requests.get(weather_url, timeout=10).json()
+                        # Extract city and country name
+                        city_name = area["areaName"][0]["value"]
+                        country   = area["country"][0]["value"]
 
-                        # 'current' block has all fields directly
-                        curr     = w.get("current", {})
-                        temp     = curr.get("temperature_2m",      "N/A")
-                        humidity = curr.get("relative_humidity_2m", "N/A")
-                        feels    = curr.get("apparent_temperature",  "N/A")
-                        wind     = curr.get("wind_speed_10m",        "N/A")
-                        wcode    = curr.get("weather_code",          0)
+                        # Temperature: C or F
+                        temp     = cc["temp_C"] if unit == "Celsius" else cc["temp_F"]
+                        feels    = cc["FeelsLikeC"] if unit == "Celsius" else cc["FeelsLikeF"]
+                        humidity = cc["humidity"]
+                        wind     = cc["windspeedKmph"]
+                        desc     = cc["weatherDesc"][0]["value"]  # e.g. "Sunny", "Partly cloudy"
 
-                        code_map = {
-                            0:  "☀️ Clear sky",      1:  "🌤 Mainly clear",
-                            2:  "⛅ Partly cloudy",   3:  "☁️ Overcast",
-                            45: "🌫 Foggy",           48: "🌫 Icy fog",
-                            51: "🌦 Light drizzle",   61: "🌧 Light rain",
-                            63: "🌧 Moderate rain",   65: "🌧 Heavy rain",
-                            71: "🌨 Light snow",      80: "🌦 Rain showers",
-                            95: "⛈ Thunderstorm",
-                        }
-                        condition = code_map.get(wcode, "🌡 Unknown")
+                        # Pick an emoji based on description keywords
+                        desc_lower = desc.lower()
+                        if "thunder" in desc_lower:                  emoji = "⛈"
+                        elif "snow" in desc_lower:                   emoji = "🌨"
+                        elif "rain" in desc_lower or "drizzle" in desc_lower: emoji = "🌧"
+                        elif "fog" in desc_lower or "mist" in desc_lower:     emoji = "🌫"
+                        elif "overcast" in desc_lower or "cloudy" in desc_lower: emoji = "☁️"
+                        elif "partly" in desc_lower:                 emoji = "⛅"
+                        elif "sunny" in desc_lower or "clear" in desc_lower:  emoji = "☀️"
+                        else:                                        emoji = "🌤"
+                        condition = f"{emoji} {desc}"
 
                         st.subheader(f"{city_name}, {country}")
                         m1, m2, m3, m4 = st.columns(4)
