@@ -416,140 +416,75 @@ window.addEventListener('message', (e) => {
 
 elif "Image Generator" in feature:
     st.header("🎨 Image Generator")
-    st.caption("Powered by Pollinations AI — free, no API key needed, runs in your browser")
+    st.caption("AI generates detailed SVG artwork — no external API, works 100% on Streamlit Cloud")
 
-    prompt = st.text_input("Describe your image",
-                           placeholder="A sunset over Mumbai skyline, golden hour...")
+    prompt = st.text_area("Describe your image",
+                          placeholder="A sunset over Mumbai skyline with orange sky and boats...")
 
     col1, col2 = st.columns(2)
-    style = col1.selectbox("Style", list(IMAGE_STYLES.keys()))
-    size  = col2.selectbox("Size", ["Square (768×768)", "Portrait (512×768)", "Landscape (768×512)"])
+    style = col1.selectbox("Art Style", [
+        "Flat Illustration", "Realistic Scene", "Watercolor",
+        "Minimalist", "Cyberpunk", "Fantasy Art"
+    ])
+    color_mood = col2.selectbox("Color Mood", [
+        "Vibrant & Colorful", "Warm & Sunset", "Cool & Night",
+        "Pastel & Soft", "Dark & Moody", "Black & White"
+    ])
 
-    size_map = {
-        "Square (768×768)":    (768, 768),
-        "Portrait (512×768)":  (512, 768),
-        "Landscape (768×512)": (768, 512),
-    }
-    w, h = size_map[size]
-    style_suffix = IMAGE_STYLES[style]
+    if st.button("✨ Generate Image", use_container_width=True):
+        if not prompt.strip():
+            st.warning("Please enter a prompt first.")
+        else:
+            with st.spinner("Generating your artwork with AI..."):
 
-    # Build the full prompt including style
-    full_prompt = (prompt + style_suffix).strip() if prompt.strip() else ""
+                svg_system = """You are an expert SVG artist. When given a description, you generate 
+a COMPLETE, DETAILED, BEAUTIFUL SVG image (800x600) with:
+- Rich backgrounds with gradients
+- Multiple detailed elements matching the description
+- Proper use of colors, shapes, shadows, and depth
+- Artistic details like clouds, lighting effects, reflections
+- Return ONLY the raw SVG code starting with <svg and ending with </svg>
+- NO explanation, NO markdown, NO backticks — just pure SVG code
+- Make it visually impressive with at least 15-20 SVG elements"""
 
-    # NOTE: Streamlit Cloud's server blocks all image API calls (HF, Pollinations, etc.)
-    # Solution: run the fetch() entirely in the BROWSER using st.components.v1.html
-    # The browser has no network restrictions — Pollinations works perfectly from JS.
-    # The image is fetched and displayed inside the HTML component itself.
+                svg_prompt = f"""Create a detailed SVG artwork of: {prompt}
+Art style: {style}
+Color mood: {color_mood}
+Make it beautiful, detailed and artistic. Return only SVG code."""
 
-    import json
-    encoded_prompt = urllib.parse.quote(full_prompt) if full_prompt else ""
+                svg_code = call_groq(
+                    [{"role": "system", "content": svg_system},
+                     {"role": "user", "content": svg_prompt}],
+                    model="llama-3.3-70b-versatile",
+                    temperature=0.7,
+                    max_tokens=4000
+                )
 
-    components.html(f"""
-<!DOCTYPE html>
-<html>
-<head>
-<style>
-  body {{
-    margin: 0; padding: 0;
-    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-    background: transparent;
-  }}
-  #container {{
-    display: flex; flex-direction: column; align-items: center; gap: 12px;
-    padding: 8px 0;
-  }}
-  #generate-btn {{
-    padding: 10px 32px;
-    background: #2563eb; color: white;
-    border: none; border-radius: 8px;
-    font-size: 15px; cursor: pointer;
-    transition: background 0.2s;
-    width: 100%;
-  }}
-  #generate-btn:hover {{ background: #1d4ed8; }}
-  #generate-btn:disabled {{ background: #93c5fd; cursor: not-allowed; }}
-  #status {{ font-size: 13px; color: #6b7280; min-height: 20px; }}
-  #img-box img {{
-    max-width: 100%; border-radius: 10px;
-    border: 1px solid #e5e7eb;
-    display: none;
-  }}
-  #download-btn {{
-    display: none;
-    padding: 8px 24px;
-    background: #f9fafb; color: #111827;
-    border: 1px solid #e5e7eb; border-radius: 8px;
-    font-size: 13px; cursor: pointer; text-decoration: none;
-  }}
-  #download-btn:hover {{ background: #f3f4f6; }}
-  #error {{ color: #dc2626; font-size: 13px; display: none; }}
-</style>
-</head>
-<body>
-<div id="container">
-  <button id="generate-btn" onclick="generateImage()"
-    {"" if full_prompt else "disabled"}>
-    ✨ Generate Image
-  </button>
-  <div id="status">{("Ready — click Generate!" if full_prompt else "Enter a prompt above first, then click Generate.")}</div>
-  <div id="error"></div>
-  <div id="img-box"><img id="result-img" /></div>
-  <a id="download-btn" download="aura_image.png">⬇ Download Image</a>
-</div>
+                # Clean up — extract just the SVG part
+                if "<svg" in svg_code and "</svg>" in svg_code:
+                    start = svg_code.index("<svg")
+                    end   = svg_code.index("</svg>") + 6
+                    svg_code = svg_code[start:end]
 
-<script>
-const PROMPT = {json.dumps(encoded_prompt)};
-const W = {w};
-const H = {h};
+                    # Show the SVG as an image
+                    st.markdown("### 🖼 Generated Artwork")
+                    components.html(f"""
+                    <div style="display:flex;justify-content:center;padding:10px 0">
+                      {svg_code}
+                    </div>
+                    """, height=650)
 
-function generateImage() {{
-  if (!PROMPT) {{ return; }}
-
-  const btn    = document.getElementById('generate-btn');
-  const status = document.getElementById('status');
-  const errEl  = document.getElementById('error');
-  const img    = document.getElementById('result-img');
-  const dlBtn  = document.getElementById('download-btn');
-
-  btn.disabled    = true;
-  btn.textContent = '⏳ Generating…';
-  status.textContent = 'Fetching from Pollinations AI… (~15 seconds)';
-  errEl.style.display = 'none';
-  img.style.display   = 'none';
-  dlBtn.style.display = 'none';
-
-  // Use a cache-busting seed so each click gives a fresh image
-  const seed = Math.floor(Math.random() * 99999);
-  const url  = `https://image.pollinations.ai/prompt/${{PROMPT}}?width=${{W}}&height=${{H}}&seed=${{seed}}&nologo=true`;
-
-  // Fetch as blob — browser has no restrictions, works perfectly
-  fetch(url)
-    .then(res => {{
-      if (!res.ok) throw new Error(`Status ${{res.status}}`);
-      return res.blob();
-    }})
-    .then(blob => {{
-      const objectUrl = URL.createObjectURL(blob);
-      img.src = objectUrl;
-      img.style.display = 'block';
-      dlBtn.href = objectUrl;
-      dlBtn.style.display = 'inline-block';
-      status.textContent = '✅ Done!';
-      btn.textContent = '✨ Generate Again';
-      btn.disabled = false;
-    }})
-    .catch(err => {{
-      errEl.textContent = '❌ Error: ' + err.message + '. Try again.';
-      errEl.style.display = 'block';
-      status.textContent = '';
-      btn.textContent = '✨ Generate Image';
-      btn.disabled = false;
-    }});
-}}
-</script>
-</body>
-</html>
-""", height=520 if full_prompt else 120)
+                    # Download as SVG file
+                    st.download_button(
+                        "⬇ Download as SVG",
+                        data=svg_code,
+                        file_name="aura_artwork.svg",
+                        mime="image/svg+xml",
+                        use_container_width=True
+                    )
+                else:
+                    st.error("Could not generate image. Please try again with a different prompt.")
+                    st.code(svg_code[:300])
 
 
 # ─────────────────────────────────────────
