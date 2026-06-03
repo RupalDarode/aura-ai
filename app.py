@@ -45,11 +45,13 @@ LANGUAGES = {
 }
 
 IMAGE_STYLES = {
-    "photorealistic" : "photorealistic, 8k uhd, RAW photo, sharp focus, perfect eyes",
-    "cinematic"      : "cinematic, movie still, dramatic lighting, bokeh, 8k",
-    "digital art"    : "digital art, highly detailed, artstation, concept art, 4k",
-    "cartoon"        : "cartoon style, pixar, vibrant colors, highly detailed, 4k",
-    "fashion"        : "vogue magazine, fashion photography, studio lighting, 8k"
+    "None":          "",
+    "Realistic":     ", ultra realistic, photographic, 8k",
+    "Anime":         ", anime style, vibrant, Studio Ghibli",
+    "Oil Painting":  ", oil painting, detailed brushwork",
+    "Cyberpunk":     ", cyberpunk, neon lights, futuristic",
+    "Watercolor":    ", watercolor, soft colors, artistic",
+    "Sketch":        ", pencil sketch, hand drawn",
 }
 
 
@@ -88,74 +90,26 @@ def call_groq(messages, model, temperature=0.7, max_tokens=1000):
 # (No API key needed, no blocked domains)
 # ─────────────────────────────────────────
 
-def detect_intent(user_input):
-    text = user_input.lower()
-    image_keywords = [
-        "generate image", "create image", "make image",
-        "draw", "create a picture", "generate a picture",
-        "show me", "image of", "picture of",
-        "draw me", "create me", "create art", "generate art"
-    ]
-    if any(kw in text for kw in image_keywords):
-        return "image"
-    return "chat"
-
-# Extract clean prompt from user message
-def extract_image_prompt(user_input):
-    text = user_input.lower()
-    remove_words = [
-        "generate image of", "create image of", "make image of",
-        "generate image", "create image", "make image",
-        "draw me a", "draw me an", "draw me", "draw a", "draw an", "draw",
-        "create a picture of", "generate a picture of",
-        "show me a", "show me an", "show me",
-        "image of", "picture of",
-        "create art of", "generate art of",
-        "create me a", "create me an", "create me"
-    ]
-    prompt = text
-    for word in remove_words:
-        prompt = prompt.replace(word, "")
-
-    detected_style = "photorealistic"
-    for style in STYLES.keys():
-        if style in text:
-            detected_style = style
-            prompt = prompt.replace(style, "")
-
-    return prompt.strip(), detected_style
-    print("✅ Styles and intent detection ready!")
-
-
-def generate_image(prompt, style):
+def generate_image(prompt: str) -> Image.Image | None:
+    """
+    Generate image via Pollinations.ai — completely free, no key needed.
+    Uses a different subdomain (image.pollinations.ai) which is NOT blocked.
+    The old free tier still works when nologo=true is NOT used.
+    """
     try:
-        final_prompt = f"{prompt}, {STYLES[style]}, masterpiece, best quality"
-        encoded      = quote(final_prompt)
-        seed_val     = int(time.time())
-
-        url = (
-            f"https://image.pollinations.ai/prompt/{encoded}"
-            f"?width=768&height=1024"
-            f"&nologo=true&seed={seed_val}"
-        )
-
-        print(f"⏳ Generating: {prompt[:50]}...")
-        response = requests.get(url, timeout=240)
-
-        if response.status_code == 200:
-            image = Image.open(BytesIO(response.content))
-            image.save(f"output_{int(time.time())}.png")
-            print("✅ Image done!")
-            return image
+        encoded = urllib.parse.quote(prompt)
+        # Use the simple GET endpoint — no auth, no payment required
+        url = f"https://image.pollinations.ai/prompt/{encoded}?width=768&height=768&seed=42&model=flux"
+        res = requests.get(url, timeout=90)
+        if res.status_code == 200 and res.headers.get("content-type", "").startswith("image"):
+            return Image.open(BytesIO(res.content))
         else:
-            print(f"❌ Failed: {response.status_code}")
+            st.error(f"❌ Image service error {res.status_code}. Try a different prompt or style.")
             return None
-
     except Exception as e:
-        print(f"❌ Error: {e}")
+        st.error(f"❌ Failed to generate image: {e}")
         return None
 
-print("✅ Image function ready!")
 
 # ─────────────────────────────────────────
 # HELPER: IMAGE ANALYSIS — Groq vision
@@ -483,26 +437,47 @@ elif "Image Generator" in feature:
         else:
             with st.spinner("Generating your artwork with AI..."):
 
-                svg_system = """You are an expert SVG artist. When given a description, you generate 
-a COMPLETE, DETAILED, BEAUTIFUL SVG image (800x600) with:
-- Rich backgrounds with gradients
-- Multiple detailed elements matching the description
-- Proper use of colors, shapes, shadows, and depth
-- Artistic details like clouds, lighting effects, reflections
-- Return ONLY the raw SVG code starting with <svg and ending with </svg>
-- NO explanation, NO markdown, NO backticks — just pure SVG code
-- Make it visually impressive with at least 15-20 SVG elements"""
+                svg_system = """You are a world-class SVG illustrator. You create stunning, 
+photorealistic-looking SVG artwork using advanced SVG techniques.
 
-                svg_prompt = f"""Create a detailed SVG artwork of: {prompt}
+STRICT RULES:
+- Output ONLY raw SVG code. No markdown, no backticks, no explanation whatsoever.
+- Start your response with <svg and end with </svg>. Nothing before or after.
+- Canvas size: viewBox="0 0 800 600" width="800" height="600"
+
+QUALITY REQUIREMENTS — you MUST use ALL of these techniques:
+1. GRADIENTS: Use <linearGradient> and <radialGradient> for skies, water, skin, buildings — never flat colors
+2. DEPTH & LAYERS: Draw background → midground → foreground elements in order
+3. REALISTIC LIGHTING: Add highlights (lighter stroke/fill) and shadows (darker shapes with opacity)
+4. TEXTURES: Use <pattern> or many small shapes to simulate texture (water ripples, grass blades, brick)
+5. FINE DETAILS: Windows on buildings, leaves on trees, waves on water, stars in sky — use groups <g>
+6. ATMOSPHERIC EFFECTS: Use <filter> with feGaussianBlur for glow, fog, soft shadows
+7. REFLECTIONS: Mirror shapes with opacity for water/glass reflections
+8. CURVES: Use <path> with bezier curves (C, Q commands) for organic shapes — NOT just rectangles
+9. MINIMUM 40 SVG elements for a rich, detailed scene
+10. COLORS: Rich, harmonious palette — use specific hex codes, not generic color names"""
+
+                svg_prompt = f"""Create a STUNNING, HIGHLY DETAILED SVG illustration of:
+"{prompt}"
+
 Art style: {style}
 Color mood: {color_mood}
-Make it beautiful, detailed and artistic. Return only SVG code."""
+
+Scene requirements:
+- Draw a complete, layered scene with background, midground, and foreground
+- Use realistic gradients for sky/atmosphere
+- Add fine details: textures, lighting, shadows, small elements
+- Make it look like professional digital art
+- Every major element must have gradient fills, not flat colors
+- Add atmospheric depth (things further away are lighter/hazier)
+
+Return ONLY the SVG code. Start with <svg viewBox="0 0 800 600" width="800" height="600"..."""
 
                 svg_code = call_groq(
                     [{"role": "system", "content": svg_system},
                      {"role": "user", "content": svg_prompt}],
                     model="llama-3.3-70b-versatile",
-                    temperature=0.7,
+                    temperature=0.4,
                     max_tokens=4000
                 )
 
@@ -515,19 +490,31 @@ Make it beautiful, detailed and artistic. Return only SVG code."""
                     # Show the SVG as an image
                     st.markdown("### 🖼 Generated Artwork")
                     components.html(f"""
-                    <div style="display:flex;justify-content:center;padding:10px 0">
-                      {svg_code}
-                    </div>
-                    """, height=650)
-
-                    # Download as SVG file
-                    st.download_button(
-                        "⬇ Download as SVG",
-                        data=svg_code,
-                        file_name="aura_artwork.svg",
-                        mime="image/svg+xml",
-                        use_container_width=True
-                    )
+<html><body style="margin:0;padding:0;background:transparent">
+<div style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:4px">
+  <div style="border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.15);width:100%">
+    {svg_code}
+  </div>
+  <button onclick="downloadSVG()" style="
+    padding:8px 28px;background:#2563eb;color:white;
+    border:none;border-radius:8px;font-size:14px;cursor:pointer;
+    font-family:sans-serif">
+    ⬇ Download SVG
+  </button>
+</div>
+<script>
+function downloadSVG() {{
+  const svgData = {repr(svg_code)};
+  const blob = new Blob([svgData], {{type:'image/svg+xml'}});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'aura_artwork.svg';
+  a.click();
+}}
+</script>
+</body></html>
+""", height=680)
+                    st.caption("💡 Tip: For a different version of the same prompt, click Generate again — each run creates a unique image.")
                 else:
                     st.error("Could not generate image. Please try again with a different prompt.")
                     st.code(svg_code[:300])
