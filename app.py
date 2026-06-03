@@ -1,676 +1,753 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import requests
 from io import BytesIO
 from PIL import Image
 import urllib.parse
 import base64
-import io
-import PyPDF2
+import json
 from datetime import datetime
+import PyPDF2
+import io
 
-st.set_page_config(page_title="Aura AI", page_icon="✨", layout="wide")
+st.set_page_config(page_title="Aura AI", page_icon="✦", layout="wide")
 
 st.markdown("""
 <style>
-    .stApp { background-color: #f9fafb; }
-    section[data-testid="stSidebar"] { background-color: #ffffff; border-right: 1px solid #e5e7eb; }
-    .stChatMessage { background-color: #ffffff !important; border: 1px solid #e5e7eb; border-radius: 10px; }
-    .attach-badge {
-        display: inline-flex; align-items: center; gap: 6px;
-        background: #eff6ff; border: 1px solid #bfdbfe;
-        border-radius: 999px; padding: 3px 10px;
-        font-size: 12px; color: #1d4ed8; margin-bottom: 6px;
-    }
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Mono:wght@300;400;500&family=Cormorant:ital,wght@0,300;0,400;1,300;1,400&display=swap');
+
+* { box-sizing: border-box; }
+.stApp { background: #05050d; color: #ece8f8; font-family: 'Syne', sans-serif; }
+#MainMenu, footer, header { visibility: hidden; }
+.block-container { padding: 0 2rem 2rem 2rem !important; max-width: 1200px !important; }
+
+.stApp::before {
+    content: '';
+    position: fixed; inset: 0;
+    background:
+        radial-gradient(ellipse at 20% 20%, rgba(139,124,248,0.07) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 80%, rgba(200,160,74,0.05) 0%, transparent 50%);
+    pointer-events: none; z-index: 0;
+    animation: bgPulse 8s ease-in-out infinite;
+}
+@keyframes bgPulse { 0%,100%{opacity:1} 50%{opacity:0.7} }
+
+.aura-header { text-align:center; padding:48px 0 32px; animation:fadeDown .8s ease forwards; }
+@keyframes fadeDown { from{opacity:0;transform:translateY(-20px)} to{opacity:1;transform:translateY(0)} }
+.aura-logo { font-family:'Cormorant',serif; font-size:clamp(3rem,6vw,5rem); font-weight:300; font-style:italic; letter-spacing:.05em; color:#ece8f8; line-height:1; margin-bottom:8px; }
+.aura-logo span { color:#c8a04a; font-weight:400; }
+.aura-tagline { font-family:'DM Mono',monospace; font-size:.68rem; letter-spacing:.3em; text-transform:uppercase; color:rgba(200,160,74,0.6); margin-bottom:24px; }
+.aura-divider { width:60px; height:1px; background:linear-gradient(90deg,transparent,#c8a04a,transparent); margin:0 auto 32px; animation:expandLine 1s ease .5s both; }
+@keyframes expandLine { from{width:0;opacity:0} to{width:60px;opacity:1} }
+
+.sec-title { font-family:'Cormorant',serif; font-size:clamp(1.8rem,3vw,2.8rem); font-weight:300; font-style:italic; color:#ece8f8; margin-bottom:6px; animation:fadeUp .6s ease forwards; }
+.sec-sub { font-family:'DM Mono',monospace; font-size:.65rem; letter-spacing:.2em; text-transform:uppercase; color:rgba(200,160,74,0.5); margin-bottom:28px; animation:fadeUp .6s ease .1s both; }
+@keyframes fadeUp { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
+
+/* Voice button */
+.voice-btn-wrap { display:flex; gap:10px; align-items:center; margin-bottom:12px; }
+.voice-status { font-family:'DM Mono',monospace; font-size:.65rem; color:rgba(200,160,74,0.6); letter-spacing:.1em; }
+.recording-pulse { display:inline-block; width:8px; height:8px; background:#f05050; border-radius:50%; animation:recPulse 1s ease infinite; margin-right:6px; }
+@keyframes recPulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(1.4)} }
+
+/* TTS audio player */
+.tts-wrap { background:rgba(200,160,74,0.06); border:1px solid rgba(200,160,74,0.15); border-radius:10px; padding:12px 16px; margin-top:8px; display:flex; align-items:center; gap:10px; }
+.tts-label { font-family:'DM Mono',monospace; font-size:.62rem; color:rgba(200,160,74,0.5); letter-spacing:.1em; text-transform:uppercase; white-space:nowrap; }
+audio { flex:1; height:32px; }
+audio::-webkit-media-controls-panel { background:rgba(200,160,74,0.1); }
+
+.stChatMessage { background:rgba(255,255,255,0.03) !important; border:1px solid rgba(255,255,255,0.06) !important; border-radius:12px !important; margin-bottom:12px !important; animation:msgSlide .4s ease forwards; backdrop-filter:blur(10px); }
+@keyframes msgSlide { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+.stChatMessage [data-testid="chatAvatarIcon-user"] { background:#c8a04a !important; }
+.stChatMessage [data-testid="chatAvatarIcon-assistant"] { background:#8b7cf8 !important; }
+
+.stChatInput { background:rgba(255,255,255,0.04) !important; border:1px solid rgba(255,255,255,0.1) !important; border-radius:12px !important; color:#ece8f8 !important; transition:border-color .3s !important; }
+.stChatInput:focus-within { border-color:rgba(200,160,74,0.5) !important; box-shadow:0 0 0 3px rgba(200,160,74,0.08) !important; }
+
+.stButton > button { background:linear-gradient(135deg,#c8a04a,#a07830) !important; color:#05050d !important; border:none !important; border-radius:8px !important; font-family:'Syne',sans-serif !important; font-weight:700 !important; font-size:.78rem !important; letter-spacing:.12em !important; text-transform:uppercase !important; padding:12px 28px !important; transition:all .3s !important; }
+.stButton > button:hover { transform:translateY(-2px) !important; box-shadow:0 8px 32px rgba(200,160,74,0.3) !important; }
+.stButton > button:active { transform:translateY(0) !important; }
+
+.stTextInput > div > div > input, .stTextArea > div > div > textarea { background:rgba(255,255,255,0.04) !important; border:1px solid rgba(255,255,255,0.1) !important; border-radius:8px !important; color:#ece8f8 !important; transition:border-color .3s !important; }
+.stTextInput > div > div > input:focus, .stTextArea > div > div > textarea:focus { border-color:rgba(200,160,74,0.5) !important; box-shadow:0 0 0 3px rgba(200,160,74,0.08) !important; }
+
+.stSelectbox > div > div { background:rgba(255,255,255,0.04) !important; border:1px solid rgba(255,255,255,0.1) !important; border-radius:8px !important; color:#ece8f8 !important; }
+.stSelectbox > div > div:hover { border-color:rgba(200,160,74,0.4) !important; }
+
+.stSlider > div > div > div { background:rgba(200,160,74,0.3) !important; }
+.stSlider > div > div > div > div { background:#c8a04a !important; }
+
+.stFileUploader { background:rgba(255,255,255,0.03) !important; border:2px dashed rgba(200,160,74,0.2) !important; border-radius:12px !important; }
+.stFileUploader:hover { border-color:rgba(200,160,74,0.5) !important; }
+
+[data-testid="metric-container"] { background:rgba(255,255,255,0.04) !important; border:1px solid rgba(255,255,255,0.08) !important; border-radius:12px !important; padding:20px !important; transition:all .3s !important; }
+[data-testid="metric-container"]:hover { border-color:rgba(200,160,74,0.3) !important; transform:translateY(-2px) !important; }
+[data-testid="stMetricValue"] { color:#c8a04a !important; font-family:'Cormorant',serif !important; font-size:2rem !important; }
+[data-testid="stMetricLabel"] { color:rgba(236,232,248,0.5) !important; font-size:.75rem !important; }
+
+div[data-testid="stSidebar"] { background:rgba(8,8,18,0.95) !important; border-right:1px solid rgba(255,255,255,0.05) !important; backdrop-filter:blur(20px) !important; }
+div[data-testid="stSidebar"] .stMarkdown h2 { font-family:'Cormorant',serif !important; font-style:italic !important; color:#c8a04a !important; font-size:1.4rem !important; font-weight:300 !important; }
+
+.stSuccess { background:rgba(200,160,74,0.08) !important; border:1px solid rgba(200,160,74,0.2) !important; border-radius:10px !important; }
+.stInfo { background:rgba(139,124,248,0.08) !important; border:1px solid rgba(139,124,248,0.2) !important; border-radius:10px !important; }
+.stError { background:rgba(248,100,100,0.08) !important; border:1px solid rgba(248,100,100,0.2) !important; border-radius:10px !important; }
+.stWarning { background:rgba(248,180,100,0.08) !important; border:1px solid rgba(248,180,100,0.2) !important; border-radius:10px !important; }
+.stSpinner > div { border-top-color:#c8a04a !important; }
+
+.aura-card { background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:28px; margin-bottom:16px; transition:all .3s; position:relative; overflow:hidden; }
+.aura-card::before { content:''; position:absolute; top:0;left:0;right:0; height:2px; background:linear-gradient(90deg,#c8a04a,#8b7cf8); transform:scaleX(0); transition:transform .4s; transform-origin:left; }
+.aura-card:hover::before { transform:scaleX(1); }
+.aura-card:hover { border-color:rgba(200,160,74,0.2); transform:translateY(-2px); box-shadow:0 8px 32px rgba(0,0,0,0.3); }
+
+.aura-footer { text-align:center; padding:32px 0 16px; font-family:'DM Mono',monospace; font-size:.62rem; letter-spacing:.15em; color:rgba(236,232,248,0.2); text-transform:uppercase; border-top:1px solid rgba(255,255,255,0.05); margin-top:48px; }
+::-webkit-scrollbar { width:4px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:rgba(200,160,74,0.3); border-radius:2px; }
+::-webkit-scrollbar-thumb:hover { background:rgba(200,160,74,0.6); }
+.stDownloadButton > button { background:transparent !important; border:1px solid rgba(200,160,74,0.4) !important; color:#c8a04a !important; border-radius:8px !important; font-family:'DM Mono',monospace !important; font-size:.7rem !important; letter-spacing:.1em !important; transition:all .3s !important; }
+.stDownloadButton > button:hover { background:rgba(200,160,74,0.1) !important; transform:translateY(-2px) !important; }
+.stCaption { color:rgba(236,232,248,0.35) !important; font-family:'DM Mono',monospace !important; font-size:.65rem !important; }
+hr { border-color:rgba(255,255,255,0.06) !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ─────────────────────────────────────────
-# CONSTANTS
-# ─────────────────────────────────────────
+# ── VOICE TO TEXT JS COMPONENT ──
+VOICE_INPUT_JS = """
+<script>
+let mediaRecorder = null;
+let audioChunks   = [];
+let isRecording   = false;
 
-GROQ_MODELS = {
-    "⚡ Llama 3.1 8B  — Fast":      "llama-3.1-8b-instant",
-    "🧠 Llama 3.3 70B — Smart":     "llama-3.3-70b-versatile",
-    "💎 Mixtral 8x7B  — Balanced":  "mixtral-8x7b-32768",
-    "🔬 Gemma 2 9B    — Google":    "gemma2-9b-it",
-    "🚀 DeepSeek R1   — Reasoning": "deepseek-r1-distill-llama-70b",
+function startVoiceRecording() {
+    navigator.mediaDevices.getUserMedia({ audio: true })
+    .then(stream => {
+        mediaRecorder  = new MediaRecorder(stream);
+        audioChunks    = [];
+        isRecording    = true;
+        document.getElementById('voiceStatus').innerHTML =
+            '<span class="recording-pulse"></span> Recording...';
+        document.getElementById('voiceBtn').textContent = '⏹ Stop';
+
+        mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+        mediaRecorder.onstop = () => {
+            const blob   = new Blob(audioChunks, { type: 'audio/webm' });
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                const b64 = reader.result.split(',')[1];
+                // Send to Streamlit via query param trick
+                const input = window.parent.document.querySelector('input[aria-label="voice_data_input"]');
+                if (input) {
+                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                    nativeInputValueSetter.call(input, b64);
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+                document.getElementById('voiceStatus').innerHTML = '✦ Click mic to speak';
+                document.getElementById('voiceBtn').textContent  = '🎙 Speak';
+                isRecording = false;
+            };
+            reader.readAsDataURL(blob);
+            stream.getTracks().forEach(t => t.stop());
+        };
+        mediaRecorder.start();
+    })
+    .catch(err => {
+        document.getElementById('voiceStatus').innerHTML = '❌ Mic access denied';
+    });
+}
+
+function stopVoiceRecording() {
+    if (mediaRecorder && isRecording) {
+        mediaRecorder.stop();
+    }
+}
+
+function toggleRecording() {
+    if (!isRecording) startVoiceRecording();
+    else               stopVoiceRecording();
+}
+</script>
+<div class="voice-btn-wrap">
+    <button id="voiceBtn" onclick="toggleRecording()"
+        style="background:linear-gradient(135deg,#8b7cf8,#6b5cf0);color:#fff;border:none;
+               border-radius:8px;padding:10px 20px;font-family:'Syne',sans-serif;
+               font-weight:700;font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;
+               cursor:pointer;transition:all .3s;display:flex;align-items:center;gap:8px;">
+        🎙 Speak
+    </button>
+    <span id="voiceStatus" class="voice-status">✦ Click mic to speak</span>
+</div>
+"""
+
+# ── TTS HELPER ──
+def text_to_speech_html(text, lang="en"):
+    """Generate HTML audio player with Web Speech API TTS."""
+    # Clean text for JS
+    clean = text.replace("'", "\\'").replace("\n", " ").replace('"', '\\"')[:500]
+    lang_map = {"English": "en-US", "Hindi": "hi-IN", "Hinglish": "hi-IN", "Marathi": "mr-IN"}
+    voice_lang = lang_map.get(lang, "en-US")
+    html = f"""
+    <div class="tts-wrap">
+        <span class="tts-label">🔊 Listen</span>
+        <button onclick="speakText()" id="ttsBtn"
+            style="background:rgba(200,160,74,0.15);border:1px solid rgba(200,160,74,0.3);
+                   color:#c8a04a;border-radius:6px;padding:6px 14px;cursor:pointer;
+                   font-family:'DM Mono',monospace;font-size:.65rem;letter-spacing:.1em;
+                   transition:all .3s;">
+            ▶ Play
+        </button>
+        <button onclick="stopSpeak()"
+            style="background:rgba(248,100,100,0.1);border:1px solid rgba(248,100,100,0.2);
+                   color:#f06060;border-radius:6px;padding:6px 14px;cursor:pointer;
+                   font-family:'DM Mono',monospace;font-size:.65rem;letter-spacing:.1em;
+                   transition:all .3s;">
+            ⏹ Stop
+        </button>
+    </div>
+    <script>
+    function speakText() {{
+        window.speechSynthesis.cancel();
+        const utt  = new SpeechSynthesisUtterance('{clean}');
+        utt.lang   = '{voice_lang}';
+        utt.rate   = 0.95;
+        utt.pitch  = 1.0;
+        const voices = window.speechSynthesis.getVoices();
+        const match  = voices.find(v => v.lang.startsWith('{voice_lang[:2]}'));
+        if (match) utt.voice = match;
+        document.getElementById('ttsBtn').textContent = '🔊 Speaking...';
+        utt.onend = () => document.getElementById('ttsBtn').textContent = '▶ Play';
+        window.speechSynthesis.speak(utt);
+    }}
+    function stopSpeak() {{
+        window.speechSynthesis.cancel();
+        const btn = document.getElementById('ttsBtn');
+        if (btn) btn.textContent = '▶ Play';
+    }}
+    </script>
+    """
+    return html
+
+# ── MODELS ──
+MODELS = {
+    "⚡ Llama 3.1 8B (Fast)":        "llama-3.1-8b-instant",
+    "🧠 Llama 3.3 70B (Smart)":      "llama-3.3-70b-versatile",
+    "💎 Mixtral 8x7B (Balanced)":    "mixtral-8x7b-32768",
+    "🔬 Gemma 2 9B (Google)":        "gemma2-9b-it",
+    "🚀 DeepSeek R1 (Reasoning)":    "deepseek-r1-distill-llama-70b",
 }
 
 LANGUAGES = {
-    "English":  "Always respond in English.",
+    "English":  "Respond in English only.",
     "Hindi":    "Hamesha Hindi mein jawab do.",
-    "Hinglish": "Hinglish mein jawab do — Hindi aur English mix karke.",
+    "Hinglish": "Hinglish mein jawab do — Hindi aur English mix karke, jaise dost baat karte hain.",
     "Marathi":  "Marathi madhe uttar dya.",
 }
 
-IMAGE_STYLES = {
-    "None":          "",
-    "Realistic":     ", ultra realistic, photographic, 8k",
-    "Anime":         ", anime style, vibrant, Studio Ghibli",
-    "Oil Painting":  ", oil painting, detailed brushwork",
-    "Cyberpunk":     ", cyberpunk, neon lights, futuristic",
-    "Watercolor":    ", watercolor, soft colors, artistic",
-    "Sketch":        ", pencil sketch, hand drawn",
-}
+# ── HEADER ──
+st.markdown("""
+<div class="aura-header">
+    <div class="aura-logo">Aura <span>AI</span></div>
+    <div class="aura-tagline">✦ &nbsp; Multi-Model Intelligence &nbsp; ✦</div>
+    <div class="aura-divider"></div>
+</div>
+""", unsafe_allow_html=True)
 
-
-# ─────────────────────────────────────────
-# HELPER: GROQ TEXT AI
-# ─────────────────────────────────────────
-
-def call_groq(messages, model, temperature=0.7, max_tokens=1000):
-    """Call Groq API and return reply text."""
-    try:
-        api_key = st.secrets["GROQ_API_KEY"]
-    except Exception:
-        return "❌ GROQ_API_KEY missing. Add it in Streamlit Settings → Secrets."
-    try:
-        res = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={"model": model, "messages": messages,
-                  "temperature": temperature, "max_tokens": max_tokens},
-            timeout=30,
-        )
-        data = res.json()
-        if "choices" in data:
-            return data["choices"][0]["message"]["content"]
-        elif "error" in data:
-            return f"❌ Groq Error: {data['error']['message']}"
-        return f"❌ Unexpected: {data}"
-    except requests.exceptions.Timeout:
-        return "⏱ Request timed out. Please try again."
-    except Exception as e:
-        return f"❌ Error: {str(e)}"
-
-
-# ─────────────────────────────────────────
-# HELPER: IMAGE GENERATION — Pollinations
-# (No API key needed, no blocked domains)
-# ─────────────────────────────────────────
-
-def generate_image(prompt: str) -> Image.Image | None:
-    """
-    Generate image via Pollinations.ai — completely free, no key needed.
-    Uses a different subdomain (image.pollinations.ai) which is NOT blocked.
-    The old free tier still works when nologo=true is NOT used.
-    """
-    try:
-        encoded = urllib.parse.quote(prompt)
-        # Use the simple GET endpoint — no auth, no payment required
-        url = f"https://image.pollinations.ai/prompt/{encoded}?width=768&height=768&seed=42&model=flux"
-        res = requests.get(url, timeout=90)
-        if res.status_code == 200 and res.headers.get("content-type", "").startswith("image"):
-            return Image.open(BytesIO(res.content))
-        else:
-            st.error(f"❌ Image service error {res.status_code}. Try a different prompt or style.")
-            return None
-    except Exception as e:
-        st.error(f"❌ Failed to generate image: {e}")
-        return None
-
-
-# ─────────────────────────────────────────
-# HELPER: IMAGE ANALYSIS — Groq vision
-# Convert image → base64 → send to Groq
-# (Works on Streamlit Cloud, no HF needed)
-# ─────────────────────────────────────────
-
-def analyze_image_groq(image: Image.Image, question: str) -> str:
-    """
-    Send image + question to Groq's vision-capable model.
-    Groq supports base64 images via the OpenAI-compatible messages format.
-    """
-    try:
-        api_key = st.secrets["GROQ_API_KEY"]
-    except Exception:
-        return "❌ GROQ_API_KEY missing."
-
-    # Resize large images to save tokens (max 1024px on longest side)
-    max_px = 1024
-    if max(image.size) > max_px:
-        ratio = max_px / max(image.size)
-        new_size = (int(image.width * ratio), int(image.height * ratio))
-        image = image.resize(new_size, Image.LANCZOS)
-
-    # Convert to base64 JPEG
-    buf = BytesIO()
-    image.convert("RGB").save(buf, format="JPEG", quality=85)
-    b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
-                },
-                {"type": "text", "text": question},
-            ],
-        }
-    ]
-
-    try:
-        res = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            # Use the vision model — meta-llama/llama-4-scout-17b-16e-instruct supports images
-            json={"model": "meta-llama/llama-4-scout-17b-16e-instruct",
-                  "messages": messages, "max_tokens": 1000},
-            timeout=30,
-        )
-        data = res.json()
-        if "choices" in data:
-            return data["choices"][0]["message"]["content"]
-        elif "error" in data:
-            return f"❌ Groq Vision Error: {data['error']['message']}"
-        return f"❌ Unexpected: {data}"
-    except Exception as e:
-        return f"❌ Error: {e}"
-
-
-# ─────────────────────────────────────────
-# HELPER: PDF TEXT EXTRACTION
-# ─────────────────────────────────────────
-
-def extract_pdf_text(pdf_file) -> str:
-    """Extract text from a PDF file object (max 8000 chars)."""
-    try:
-        reader = PyPDF2.PdfReader(io.BytesIO(pdf_file.read()))
-        text = "".join(page.extract_text() or "" for page in reader.pages)
-        return text[:8000]
-    except Exception as e:
-        return f"ERROR: {e}"
-
-
-# ─────────────────────────────────────────
-# SIDEBAR
-# ─────────────────────────────────────────
-
+# ── SIDEBAR ──
 with st.sidebar:
-    st.title("✨ Aura AI")
-    st.caption("Built by Rupal Darode")
-    st.divider()
+    st.markdown("## ✦ Aura Settings")
+    st.markdown("---")
 
-    feature = st.selectbox("Choose a feature", [
+    feature = st.selectbox("Choose Feature", [
         "💬 AI Chat",
         "🎨 Image Generator",
         "🖼 Image Analyzer",
+        "📄 PDF Chat",
         "🌤 Weather",
         "💻 Code Assistant",
     ])
 
-    st.divider()
+    if "Chat" in feature or "Code" in feature or "PDF" in feature:
+        st.markdown("**AI Model**")
+        selected_model_name = st.selectbox("Model", list(MODELS.keys()))
+        selected_model = MODELS[selected_model_name]
 
-    is_chat = any(x in feature for x in ["Chat", "Code"])
+        st.markdown("**Language**")
+        selected_lang = st.selectbox("Language", list(LANGUAGES.keys()))
 
-    if is_chat:
-        model_name  = st.selectbox("Model", list(GROQ_MODELS.keys()))
-        model_id    = GROQ_MODELS[model_name]
-        language    = st.selectbox("Language", list(LANGUAGES.keys()))
-        lang_rule   = LANGUAGES[language]
         temperature = st.slider("Creativity", 0.1, 1.0, 0.7)
         max_tokens  = st.slider("Max Tokens", 100, 4000, 1000)
 
-        if st.button("🗑 Clear Chat"):
-            st.session_state.pop("messages", None)
-            st.session_state.pop("pdf_context", None)
+        if st.button("Clear Chat", use_container_width=True):
+            for key in ["messages", "pdf_text", "voice_transcript"]:
+                if key in st.session_state:
+                    del st.session_state[key]
             st.rerun()
 
-        if st.session_state.get("messages"):
-            lines = [
-                f"{'You' if m['role'] == 'user' else 'Aura'}: {m['content']}"
+        if "messages" in st.session_state and len(st.session_state.messages) > 0:
+            chat_export = "\n\n".join([
+                f"{'You' if m['role']=='user' else 'Aura'}: {m['content']}"
                 for m in st.session_state.messages
-                if isinstance(m["content"], str)
-            ]
+            ])
             st.download_button(
-                "📥 Export Chat", "\n\n".join(lines),
+                "Export Chat", chat_export,
                 file_name=f"aura_chat_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
-                mime="text/plain",
+                mime="text/plain", use_container_width=True
             )
-    else:
-        model_id    = GROQ_MODELS["⚡ Llama 3.1 8B  — Fast"]
-        lang_rule   = LANGUAGES["English"]
-        temperature = 0.7
-        max_tokens  = 1000
+
+    st.markdown("---")
+    st.caption("Built by Rupal Darode ✦")
 
 
-# ─────────────────────────────────────────
-# FEATURE 1 — AI CHAT
-# ─────────────────────────────────────────
+# ── HELPER: CALL GROQ ──
+def call_groq(messages, model, temperature=0.7, max_tokens=1000):
+    try:
+        GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
+    except Exception:
+        return "❌ GROQ_API_KEY not found in Streamlit secrets."
+    try:
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type":  "application/json"
+        }
+        payload = {
+            "model": model, "messages": messages,
+            "temperature": temperature, "max_tokens": max_tokens,
+        }
+        res  = requests.post("https://api.groq.com/openai/v1/chat/completions",
+                             headers=headers, json=payload, timeout=30)
+        data = res.json()
+        if "choices" in data:
+            return data["choices"][0]["message"]["content"]
+        elif "error" in data:
+            return f"❌ API Error: {data['error']['message']}"
+        else:
+            return f"❌ Unexpected: {data}"
+    except requests.exceptions.Timeout:
+        return "⏱ Request timed out."
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
 
-if "AI Chat" in feature:
-    st.header("💬 AI Chat")
-    if is_chat:
-        st.caption(f"Model: {model_name}  |  Language: {language}")
 
-    # Message history
+# ── HELPER: TRANSCRIBE AUDIO VIA GROQ WHISPER ──
+def transcribe_audio(audio_b64: str) -> str:
+    try:
+        GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
+    except Exception:
+        return ""
+    try:
+        audio_bytes = base64.b64decode(audio_b64)
+        files   = {"file": ("audio.webm", audio_bytes, "audio/webm")}
+        data    = {"model": "whisper-large-v3"}
+        headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
+        res = requests.post(
+            "https://api.groq.com/openai/v1/audio/transcriptions",
+            headers=headers, files=files, data=data, timeout=30
+        )
+        result = res.json()
+        return result.get("text", "")
+    except Exception:
+        return ""
+
+
+# ── HELPER: RENDER CHAT WITH VOICE ──
+def render_chat_with_voice(system_prompt, lang="English"):
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
+    # Show history
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
-            if isinstance(msg["content"], str):
-                st.markdown(msg["content"])
+            st.markdown(msg["content"])
+            # TTS button on every assistant message
+            if msg["role"] == "assistant":
+                st.components.v1.html(text_to_speech_html(msg["content"], lang), height=60)
 
-    # PDF badge
-    if st.session_state.get("pdf_context"):
-        pdf_name = st.session_state.get("pdf_name", "document.pdf")
-        st.markdown(f'<div class="attach-badge">📄 {pdf_name} — PDF loaded</div>',
-                    unsafe_allow_html=True)
+    # ── VOICE INPUT SECTION ──
+    st.markdown("---")
+    st.markdown('<div style="font-family:\'DM Mono\',monospace;font-size:.65rem;letter-spacing:.18em;color:rgba(200,160,74,0.5);text-transform:uppercase;margin-bottom:8px;">🎙 Voice Input</div>', unsafe_allow_html=True)
 
-    # ── Input row: [📎 🎤 icons]  [chat input] ──────────────────────
-    left_col, right_col = st.columns([2.2, 8])
+    # Browser-based speech recognition (Web Speech API)
+    voice_html = """
+    <script>
+    let recognition = null;
+    let isListening = false;
 
-    with left_col:
-        components.html("""
-<style>
-  body { margin:0; padding:0; background:transparent; }
-  .bar { display:flex; align-items:center; gap:6px; padding:4px 0; }
-  .icon-btn {
-    width:36px; height:36px; border-radius:50%;
-    border:1px solid #e5e7eb; background:#f9fafb;
-    font-size:16px; cursor:pointer;
-    display:flex; align-items:center; justify-content:center;
-    transition:background 0.15s;
-  }
-  .icon-btn:hover { background:#f3f4f6; }
-  .icon-btn.listening { background:#fee2e2; animation:pulse 1s infinite; }
-  @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.13)} }
-  #tip { font-size:11px; color:#9ca3af; white-space:nowrap; display:none; }
-</style>
-<div class="bar">
-  <label for="pdf-input" class="icon-btn" title="Attach PDF">📎</label>
-  <input id="pdf-input" type="file" accept=".pdf" style="display:none" onchange="sendPdf(this)">
-  <button id="mic-btn" class="icon-btn" title="Speak a message">🎤</button>
-  <span id="tip"></span>
-</div>
-<script>
-function sendPdf(input) {
-  const file = input.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    window.parent.postMessage({ type:'pdf_upload', name:file.name, data:reader.result }, '*');
-  };
-  reader.readAsDataURL(file);
-}
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-const micBtn = document.getElementById('mic-btn');
-const tip = document.getElementById('tip');
-if (!SR) {
-  micBtn.title = 'Use Chrome for voice';
-  micBtn.style.opacity = '0.4';
-} else {
-  const rec = new SR();
-  rec.lang = 'en-US';
-  rec.interimResults = true;
-  rec.continuous = false;
-  let finalText = '';
-  rec.onstart  = () => { micBtn.classList.add('listening'); micBtn.textContent='⏹'; finalText=''; tip.style.display='none'; };
-  rec.onresult = (e) => {
-    let interim = '';
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      const t = e.results[i][0].transcript;
-      e.results[i].isFinal ? finalText += t : interim += t;
+    function toggleVoice() {
+        const btn    = document.getElementById('micBtn');
+        const status = document.getElementById('micStatus');
+        const output = document.getElementById('transcript');
+
+        if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+            status.textContent = '❌ Browser not supported. Use Chrome.';
+            return;
+        }
+
+        if (isListening) {
+            recognition.stop();
+            return;
+        }
+
+        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        recognition = new SR();
+        recognition.continuous      = false;
+        recognition.interimResults  = true;
+        recognition.lang            = 'en-IN';
+
+        recognition.onstart = () => {
+            isListening = true;
+            btn.innerHTML = '<span style="display:inline-block;width:10px;height:10px;background:#f05050;border-radius:50%;animation:recPulse 1s infinite;margin-right:6px;"></span>Listening...';
+            btn.style.background = 'linear-gradient(135deg,#f05050,#c03030)';
+            status.textContent   = '🔴 Speak now...';
+        };
+        recognition.onresult = (e) => {
+            let interim = '', final = '';
+            for (let i = e.resultIndex; i < e.results.length; i++) {
+                if (e.results[i].isFinal) final   += e.results[i][0].transcript;
+                else                       interim += e.results[i][0].transcript;
+            }
+            output.value = final || interim;
+            status.textContent = interim ? '💬 ' + interim : '✅ Got it!';
+        };
+        recognition.onerror = (e) => {
+            status.textContent = '❌ ' + e.error + '. Try again.';
+            resetBtn();
+        };
+        recognition.onend = () => {
+            isListening = false;
+            resetBtn();
+            // Auto-fill chat input if we got text
+            const txt = output.value.trim();
+            if (txt) {
+                status.textContent = '✅ Transcript ready — paste below or click Send';
+                // Try to fill streamlit chat input
+                const chatInputs = window.parent.document.querySelectorAll('textarea');
+                chatInputs.forEach(inp => {
+                    if (inp.getAttribute('data-testid') === 'stChatInputTextArea') {
+                        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;
+                        setter.call(inp, txt);
+                        inp.dispatchEvent(new Event('input',{bubbles:true}));
+                    }
+                });
+            }
+        };
+        recognition.start();
     }
-    tip.textContent = finalText || interim;
-    tip.style.display = 'inline';
-  };
-  rec.onend = () => {
-    micBtn.classList.remove('listening');
-    micBtn.textContent = '🎤';
-    if (finalText.trim()) {
-      window.parent.postMessage({ type:'voice_transcript', text:finalText.trim() }, '*');
-      tip.textContent = '✅ Sent!';
-      setTimeout(() => { tip.style.display='none'; }, 1500);
-    } else { tip.style.display='none'; }
-  };
-  rec.onerror = (e) => {
-    micBtn.classList.remove('listening');
-    micBtn.textContent = '🎤';
-    tip.textContent = '❌ ' + e.error;
-    tip.style.display = 'inline';
-  };
-  micBtn.addEventListener('click', () => {
-    micBtn.classList.contains('listening') ? rec.stop() : rec.start();
-  });
-}
-window.addEventListener('message', (e) => {
-  if (e.data?.type === 'tts' && e.data.text) {
-    const u = new SpeechSynthesisUtterance(e.data.text);
-    u.lang = 'en-US'; u.rate = 1.0;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(u);
-  }
-});
-</script>
-""", height=48)
 
-    with right_col:
-        user_input = st.chat_input("Type or use the mic…")
+    function resetBtn() {
+        const btn  = document.getElementById('micBtn');
+        const stat = document.getElementById('micStatus');
+        if (btn)  { btn.innerHTML = '🎙 Speak'; btn.style.background = 'linear-gradient(135deg,#8b7cf8,#6b5cf0)'; }
+        isListening = false;
+    }
 
-    # Voice text box — auto-filled after mic sends transcript
-    voice_text = st.text_input("voice", key="voice_input_box",
-                               label_visibility="collapsed",
-                               placeholder="Voice text appears here — press Enter to send")
+    function copyTranscript() {
+        const txt = document.getElementById('transcript').value;
+        if (!txt) return;
+        navigator.clipboard.writeText(txt).then(() => {
+            document.getElementById('micStatus').textContent = '📋 Copied! Paste in chat below.';
+        });
+    }
+    </script>
 
-    # PDF uploader (shown when 📎 icon is clicked in HTML)
-    if st.session_state.get("show_pdf_uploader"):
-        pdf_file = st.file_uploader("PDF", type=["pdf"],
-                                    label_visibility="collapsed", key="pdf_uploader")
-        if pdf_file and st.session_state.get("pdf_name") != pdf_file.name:
-            with st.spinner("Reading PDF..."):
-                text = extract_pdf_text(pdf_file)
-            if not text.startswith("ERROR"):
-                st.session_state.pdf_context       = text
-                st.session_state.pdf_name          = pdf_file.name
-                st.session_state.show_pdf_uploader = False
-                st.rerun()
-            else:
-                st.error(text)
+    <style>
+    @keyframes recPulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(1.4)} }
+    #micBtn {
+        background: linear-gradient(135deg,#8b7cf8,#6b5cf0);
+        color: #fff; border: none; border-radius: 8px;
+        padding: 10px 22px; font-weight: 700; font-size: .72rem;
+        letter-spacing: .12em; text-transform: uppercase;
+        cursor: pointer; transition: all .3s; margin-right:8px;
+    }
+    #micBtn:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(139,124,248,0.3); }
+    #copyBtn {
+        background: rgba(200,160,74,0.12); color: #c8a04a;
+        border: 1px solid rgba(200,160,74,0.3); border-radius: 8px;
+        padding: 10px 18px; font-size: .7rem; letter-spacing: .1em;
+        text-transform: uppercase; cursor: pointer; transition: all .3s;
+    }
+    #copyBtn:hover { background: rgba(200,160,74,0.2); }
+    #transcript {
+        width: 100%; margin-top: 10px; padding: 10px 14px;
+        background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 8px; color: #ece8f8; font-size: .85rem;
+        font-family: 'Syne', sans-serif; resize: none; min-height: 44px;
+        transition: border-color .3s;
+    }
+    #transcript:focus { outline: none; border-color: rgba(200,160,74,0.5); }
+    #micStatus { font-family: 'DM Mono',monospace; font-size: .62rem; color: rgba(200,160,74,0.6); letter-spacing:.1em; margin-top:6px; display:block; }
+    </style>
 
-    final_input = user_input or (voice_text.strip() if voice_text else None)
+    <div>
+        <button id="micBtn" onclick="toggleVoice()">🎙 Speak</button>
+        <button id="copyBtn" onclick="copyTranscript()">📋 Copy</button>
+        <textarea id="transcript" placeholder="Your speech will appear here..." rows="2"></textarea>
+        <span id="micStatus">✦ Click mic → speak → copy → paste in chat</span>
+    </div>
+    """
+    st.components.v1.html(voice_html, height=160)
 
-    if final_input:
-        st.session_state.messages.append({"role": "user", "content": final_input})
+    # Text chat input
+    st.markdown('<div style="font-family:\'DM Mono\',monospace;font-size:.65rem;letter-spacing:.18em;color:rgba(200,160,74,0.5);text-transform:uppercase;margin:12px 0 6px;">💬 Type or paste message</div>', unsafe_allow_html=True)
+    prompt = st.chat_input("Message Aura...")
+    if prompt:
+        st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
-            st.markdown(final_input)
+            st.markdown(prompt)
 
-        system = f"You are Aura, a helpful and friendly AI assistant. {lang_rule}"
-        if st.session_state.get("pdf_context"):
-            system += (
-                f"\n\nThe user has attached a PDF. Answer questions based on it:\n\n"
-                f"---\n{st.session_state.pdf_context}\n---\n"
-                f"If the answer is not in the PDF, say so."
-            )
-
-        full_messages = [{"role": "system", "content": system}] + [
+        all_messages = [{"role": "system", "content": system_prompt}] + [
             {"role": m["role"], "content": m["content"]}
             for m in st.session_state.messages
         ]
 
         with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                reply = call_groq(full_messages, model_id, temperature, max_tokens)
+            with st.spinner(""):
+                reply = call_groq(all_messages, selected_model, temperature, max_tokens)
                 st.markdown(reply)
-
-        st.session_state.messages.append({"role": "assistant", "content": reply})
-
-        # TTS — send reply text to the mic iframe to read aloud
-        tts_js = f"""
-        <script>
-        document.querySelectorAll('iframe').forEach(f => {{
-            try {{ f.contentWindow.postMessage({{type:'tts',text:{repr(reply[:400])}}}, '*'); }} catch(e) {{}}
-        }});
-        </script>"""
-        components.html(tts_js, height=0)
+                # Auto TTS for latest reply
+                st.components.v1.html(text_to_speech_html(reply, lang), height=60)
+                st.session_state.messages.append({"role": "assistant", "content": reply})
 
 
-# ─────────────────────────────────────────
-# FEATURE 2 — IMAGE GENERATOR
-# Uses Pollinations.ai — free, no key, not blocked
-# ─────────────────────────────────────────
+# ══════════════════════════════════════════
+# FEATURE 1: AI CHAT
+# ══════════════════════════════════════════
+if "AI Chat" in feature:
+    st.markdown('<div class="sec-title">💬 AI Chat</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-sub">Multi-model conversational intelligence · Voice enabled</div>', unsafe_allow_html=True)
+    st.caption(f"Model: {selected_model_name}  ·  Language: {selected_lang}")
 
+    system_prompt = f"You are Aura, a helpful and friendly AI assistant. {LANGUAGES[selected_lang]}"
+    render_chat_with_voice(system_prompt, selected_lang)
+
+
+# ══════════════════════════════════════════
+# FEATURE 2: IMAGE GENERATOR
+# ══════════════════════════════════════════
 elif "Image Generator" in feature:
-    st.header("🎨 Image Generator")
-    st.caption("AI generates detailed SVG artwork — no external API, works 100% on Streamlit Cloud")
+    st.markdown('<div class="sec-title">🎨 Image Generator</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-sub">Powered by Pollinations AI — Free & unlimited</div>', unsafe_allow_html=True)
 
-    prompt = st.text_area("Describe your image",
-                          placeholder="A sunset over Mumbai skyline with orange sky and boats...")
+    styles = {
+        "None": "", "Realistic": ", ultra realistic, 8k, cinematic lighting",
+        "Anime": ", anime style, vibrant colors, Studio Ghibli",
+        "Oil Painting": ", oil painting, detailed brushwork, museum quality",
+        "Cyberpunk": ", cyberpunk, neon lights, futuristic city, blade runner",
+        "Watercolor": ", watercolor art, soft colors, artistic",
+        "Sketch": ", pencil sketch, hand drawn, detailed",
+    }
 
-    col1, col2 = st.columns(2)
-    style = col1.selectbox("Art Style", [
-        "Flat Illustration", "Realistic Scene", "Watercolor",
-        "Minimalist", "Cyberpunk", "Fantasy Art"
-    ])
-    color_mood = col2.selectbox("Color Mood", [
-        "Vibrant & Colorful", "Warm & Sunset", "Cool & Night",
-        "Pastel & Soft", "Dark & Moody", "Black & White"
-    ])
+    st.markdown('<div class="aura-card">', unsafe_allow_html=True)
+    image_prompt = st.text_area("Describe your image",
+                                placeholder="A beautiful Indian woman in traditional saree, golden hour...", height=100)
+    col1, col2, col3 = st.columns(3)
+    with col1: style  = st.selectbox("Style",  list(styles.keys()))
+    with col2: width  = st.slider("Width",  256, 1024, 512, step=64)
+    with col3: height_val = st.slider("Height", 256, 1024, 512, step=64)
+    negative = st.text_input("Negative prompt", placeholder="blurry, ugly, distorted...")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    if st.button("✨ Generate Image", use_container_width=True):
-        if not prompt.strip():
-            st.warning("Please enter a prompt first.")
+    if st.button("✦ Generate Image", use_container_width=True):
+        if image_prompt.strip():
+            with st.spinner("Creating your image..."):
+                try:
+                    full_prompt = image_prompt + styles[style]
+                    encoded     = urllib.parse.quote(full_prompt)
+                    url         = f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height_val}&nologo=true"
+                    response    = requests.get(url, timeout=60)
+                    response.raise_for_status()
+                    image = Image.open(BytesIO(response.content))
+                    st.image(image, use_container_width=True)
+                    buf = BytesIO()
+                    image.save(buf, format="PNG")
+                    st.download_button("Download Image", buf.getvalue(),
+                                       file_name="aura_image.png", mime="image/png",
+                                       use_container_width=True)
+                except Exception as e:
+                    st.error(f"Failed: {e}")
         else:
-            with st.spinner("Generating your artwork with AI..."):
-
-                svg_system = """You are a world-class SVG illustrator. You create stunning, 
-photorealistic-looking SVG artwork using advanced SVG techniques.
-
-STRICT RULES:
-- Output ONLY raw SVG code. No markdown, no backticks, no explanation whatsoever.
-- Start your response with <svg and end with </svg>. Nothing before or after.
-- Canvas size: viewBox="0 0 800 600" width="800" height="600"
-
-QUALITY REQUIREMENTS — you MUST use ALL of these techniques:
-1. GRADIENTS: Use <linearGradient> and <radialGradient> for skies, water, skin, buildings — never flat colors
-2. DEPTH & LAYERS: Draw background → midground → foreground elements in order
-3. REALISTIC LIGHTING: Add highlights (lighter stroke/fill) and shadows (darker shapes with opacity)
-4. TEXTURES: Use <pattern> or many small shapes to simulate texture (water ripples, grass blades, brick)
-5. FINE DETAILS: Windows on buildings, leaves on trees, waves on water, stars in sky — use groups <g>
-6. ATMOSPHERIC EFFECTS: Use <filter> with feGaussianBlur for glow, fog, soft shadows
-7. REFLECTIONS: Mirror shapes with opacity for water/glass reflections
-8. CURVES: Use <path> with bezier curves (C, Q commands) for organic shapes — NOT just rectangles
-9. MINIMUM 40 SVG elements for a rich, detailed scene
-10. COLORS: Rich, harmonious palette — use specific hex codes, not generic color names"""
-
-                svg_prompt = f"""Create a STUNNING, HIGHLY DETAILED SVG illustration of:
-"{prompt}"
-
-Art style: {style}
-Color mood: {color_mood}
-
-Scene requirements:
-- Draw a complete, layered scene with background, midground, and foreground
-- Use realistic gradients for sky/atmosphere
-- Add fine details: textures, lighting, shadows, small elements
-- Make it look like professional digital art
-- Every major element must have gradient fills, not flat colors
-- Add atmospheric depth (things further away are lighter/hazier)
-
-Return ONLY the SVG code. Start with <svg viewBox="0 0 800 600" width="800" height="600"..."""
-
-                svg_code = call_groq(
-                    [{"role": "system", "content": svg_system},
-                     {"role": "user", "content": svg_prompt}],
-                    model="llama-3.3-70b-versatile",
-                    temperature=0.4,
-                    max_tokens=4000
-                )
-
-                # Clean up — extract just the SVG part
-                if "<svg" in svg_code and "</svg>" in svg_code:
-                    start = svg_code.index("<svg")
-                    end   = svg_code.index("</svg>") + 6
-                    svg_code = svg_code[start:end]
-
-                    # Show the SVG as an image
-                    st.markdown("### 🖼 Generated Artwork")
-                    components.html(f"""
-<html><body style="margin:0;padding:0;background:transparent">
-<div style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:4px">
-  <div style="border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.15);width:100%">
-    {svg_code}
-  </div>
-  <button onclick="downloadSVG()" style="
-    padding:8px 28px;background:#2563eb;color:white;
-    border:none;border-radius:8px;font-size:14px;cursor:pointer;
-    font-family:sans-serif">
-    ⬇ Download SVG
-  </button>
-</div>
-<script>
-function downloadSVG() {{
-  const svgData = {repr(svg_code)};
-  const blob = new Blob([svgData], {{type:'image/svg+xml'}});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'aura_artwork.svg';
-  a.click();
-}}
-</script>
-</body></html>
-""", height=680)
-                    st.caption("💡 Tip: For a different version of the same prompt, click Generate again — each run creates a unique image.")
-                else:
-                    st.error("Could not generate image. Please try again with a different prompt.")
-                    st.code(svg_code[:300])
+            st.warning("Please enter a prompt!")
 
 
-# ─────────────────────────────────────────
-# FEATURE 3 — IMAGE ANALYZER
-# Uses Groq vision (base64) — no HF needed
-# ─────────────────────────────────────────
-
+# ══════════════════════════════════════════
+# FEATURE 3: IMAGE ANALYZER
+# ══════════════════════════════════════════
 elif "Image Analyzer" in feature:
-    st.header("🖼 Image Analyzer")
-    st.caption("Upload an image — Groq vision AI will analyze it directly")
+    st.markdown('<div class="sec-title">🖼 Image Analyzer</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-sub">Upload any image and ask anything about it</div>', unsafe_allow_html=True)
 
-    uploaded = st.file_uploader("Upload an image", type=["png", "jpg", "jpeg", "webp"])
-
-    if not uploaded:
-        st.info("Upload an image to get started.")
-    else:
+    uploaded = st.file_uploader("Upload an image", type=["png","jpg","jpeg","webp"])
+    if uploaded:
         image = Image.open(uploaded)
         st.image(image, use_container_width=True)
+        st.markdown("**Quick Actions**")
+        col1, col2, col3, col4 = st.columns(4)
+        quick_q = ""
+        with col1:
+            if st.button("Describe"):  quick_q = "Describe this image in detail."
+        with col2:
+            if st.button("Colors"):    quick_q = "What are the main colors?"
+        with col3:
+            if st.button("Mood"):      quick_q = "What is the mood or emotion?"
+        with col4:
+            if st.button("Objects"):   quick_q = "List all objects you can identify."
 
-        st.markdown("**Quick actions:**")
-        c1, c2, c3, c4 = st.columns(4)
-        question = ""
-        if c1.button("📝 Describe"): question = "Describe this image in detail."
-        if c2.button("🎨 Colors"):   question = "What are the main colors in this image?"
-        if c3.button("😊 Mood"):     question = "What is the mood or emotion of this image?"
-        if c4.button("📦 Objects"):  question = "List all objects you can see in this image."
-
-        question = st.text_input("Or type your own question:", value=question,
-                                 placeholder="What is happening in this image?")
-
-        if st.button("🔍 Analyze", use_container_width=True):
-            if not question:
-                st.warning("Please enter a question.")
-            else:
-                with st.spinner("Analyzing your image with Groq vision..."):
-                    reply = analyze_image_groq(image, question)
+        user_q = st.text_input("Or ask your own question:", value=quick_q,
+                               placeholder="What is happening in this image?")
+        if st.button("Analyze", use_container_width=True):
+            if user_q:
+                with st.spinner("Analyzing..."):
+                    reply = call_groq([
+                        {"role": "system", "content": "You are an expert image analyst."},
+                        {"role": "user",   "content": f"I have uploaded an image. {user_q}"}
+                    ], "llama-3.3-70b-versatile", 0.3, 1000)
                     st.success(reply)
+                    st.components.v1.html(text_to_speech_html(reply), height=60)
+            else:
+                st.warning("Please enter a question!")
+    else:
+        st.info("Upload an image to get started!")
 
 
-# ─────────────────────────────────────────
-# FEATURE 4 — WEATHER
-# Fixed: use correct Open-Meteo field names
-# ─────────────────────────────────────────
+# ══════════════════════════════════════════
+# FEATURE 4: PDF CHAT
+# ══════════════════════════════════════════
+elif "PDF" in feature:
+    st.markdown('<div class="sec-title">📄 PDF Chat</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-sub">Upload a PDF and have a conversation with it</div>', unsafe_allow_html=True)
 
+    uploaded_pdf = st.file_uploader("Upload PDF", type=["pdf"])
+    if uploaded_pdf:
+        if "pdf_text" not in st.session_state:
+            with st.spinner("Reading PDF..."):
+                try:
+                    pdf_reader = PyPDF2.PdfReader(io.BytesIO(uploaded_pdf.read()))
+                    text = "".join(page.extract_text() + "\n" for page in pdf_reader.pages)
+                    st.session_state.pdf_text = text[:8000]
+                    st.success(f"PDF loaded — {len(pdf_reader.pages)} pages")
+                except Exception as e:
+                    st.error(f"Could not read PDF: {e}")
+
+        if "pdf_text" in st.session_state:
+            st.caption(f"PDF loaded · {len(st.session_state.pdf_text)} characters")
+            system_prompt = f"""You are a helpful assistant. Answer based on this document:\n\n---\n{st.session_state.pdf_text}\n---\n\nIf not in document, say so. {LANGUAGES[selected_lang]}"""
+            render_chat_with_voice(system_prompt, selected_lang)
+    else:
+        st.info("Upload a PDF to start chatting with it!")
+        for key in ["messages", "pdf_text"]:
+            if key in st.session_state:
+                del st.session_state[key]
+
+
+# ══════════════════════════════════════════
+# FEATURE 5: WEATHER
+# ══════════════════════════════════════════
 elif "Weather" in feature:
-    st.header("🌤 Weather")
-    st.caption("Real-time weather — no API key needed")
+    st.markdown('<div class="sec-title">🌤 Weather</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-sub">Real-time weather for any city worldwide</div>', unsafe_allow_html=True)
 
-    col1, col2 = st.columns([3, 1])
-    city = col1.text_input("Enter a city name", placeholder="Nagpur, Mumbai, Delhi...")
-    unit = col2.selectbox("Unit", ["Celsius", "Fahrenheit"])
+    st.markdown('<div class="aura-card">', unsafe_allow_html=True)
+    col1, col2 = st.columns([3,1])
+    with col1: city = st.text_input("Enter city name", placeholder="Nagpur, Mumbai, Delhi...")
+    with col2: unit = st.selectbox("Unit", ["Celsius","Fahrenheit"])
+    st.markdown('</div>', unsafe_allow_html=True)
 
     if st.button("Get Weather", use_container_width=True):
-        if not city.strip():
-            st.warning("Please enter a city name.")
-        else:
+        if city.strip():
             with st.spinner("Fetching weather..."):
                 try:
-                    # wttr.in — simple, reliable, no API key, works on Streamlit Cloud
-                    # Returns JSON with current weather for any city name
                     unit_sym = "°C" if unit == "Celsius" else "°F"
-                    wttr_url = f"https://wttr.in/{urllib.parse.quote(city)}?format=j1"
-                    res = requests.get(wttr_url, timeout=15)
-
-                    if res.status_code != 200:
-                        st.error(f"City not found or service unavailable. Try a different spelling.")
+                    geo_res  = requests.get(
+                        f"https://geocoding-api.open-meteo.com/v1/search?name={urllib.parse.quote(city)}&count=1",
+                        timeout=10).json()
+                    if "results" not in geo_res or not geo_res["results"]:
+                        st.error("City not found.")
                     else:
-                        data = res.json()
-                        cc   = data["current_condition"][0]   # current conditions block
-                        area = data["nearest_area"][0]
-
-                        # Extract city and country name
-                        city_name = area["areaName"][0]["value"]
-                        country   = area["country"][0]["value"]
-
-                        # Temperature: C or F
-                        temp     = cc["temp_C"] if unit == "Celsius" else cc["temp_F"]
-                        feels    = cc["FeelsLikeC"] if unit == "Celsius" else cc["FeelsLikeF"]
-                        humidity = cc["humidity"]
-                        wind     = cc["windspeedKmph"]
-                        desc     = cc["weatherDesc"][0]["value"]  # e.g. "Sunny", "Partly cloudy"
-
-                        # Pick an emoji based on description keywords
-                        desc_lower = desc.lower()
-                        if "thunder" in desc_lower:                  emoji = "⛈"
-                        elif "snow" in desc_lower:                   emoji = "🌨"
-                        elif "rain" in desc_lower or "drizzle" in desc_lower: emoji = "🌧"
-                        elif "fog" in desc_lower or "mist" in desc_lower:     emoji = "🌫"
-                        elif "overcast" in desc_lower or "cloudy" in desc_lower: emoji = "☁️"
-                        elif "partly" in desc_lower:                 emoji = "⛅"
-                        elif "sunny" in desc_lower or "clear" in desc_lower:  emoji = "☀️"
-                        else:                                        emoji = "🌤"
-                        condition = f"{emoji} {desc}"
-
-                        st.subheader(f"{city_name}, {country}")
-                        m1, m2, m3, m4 = st.columns(4)
-                        m1.metric("🌡 Temperature", f"{temp}{unit_sym}", f"Feels {feels}{unit_sym}")
-                        m2.metric("💧 Humidity",    f"{humidity}%")
-                        m3.metric("💨 Wind Speed",  f"{wind} km/h")
-                        m4.metric("🌤 Condition",   condition)
-
+                        loc  = geo_res["results"][0]
+                        lat, lon = loc["latitude"], loc["longitude"]
+                        name     = loc.get("name", city)
+                        country  = loc.get("country", "")
+                        w = requests.get(
+                            f"https://api.open-meteo.com/v1/forecast?"
+                            f"latitude={lat}&longitude={lon}"
+                            f"&current=temperature_2m,relative_humidity_2m,"
+                            f"wind_speed_10m,weather_code,apparent_temperature"
+                            f"&temperature_unit={'celsius' if unit=='Celsius' else 'fahrenheit'}",
+                            timeout=10).json()
+                        curr     = w["current"]
+                        temp     = curr["temperature_2m"]
+                        feels    = curr["apparent_temperature"]
+                        humidity = curr["relative_humidity_2m"]
+                        wind     = curr["wind_speed_10m"]
+                        code     = curr["weather_code"]
+                        desc_map = {
+                            0:"☀️ Clear",1:"🌤 Mainly Clear",2:"⛅ Partly Cloudy",
+                            3:"☁️ Overcast",45:"🌫 Foggy",51:"🌦 Drizzle",
+                            61:"🌧 Light Rain",63:"🌧 Rain",65:"🌧 Heavy Rain",
+                            71:"🌨 Snow",80:"🌦 Showers",95:"⛈ Thunderstorm",
+                        }
+                        desc = desc_map.get(code, "🌡 Unknown")
+                        st.success(f"**{name}, {country}**")
+                        c1,c2,c3,c4 = st.columns(4)
+                        c1.metric("Temperature", f"{temp}{unit_sym}", f"Feels {feels}{unit_sym}")
+                        c2.metric("Humidity",    f"{humidity}%")
+                        c3.metric("Wind Speed",  f"{wind} km/h")
+                        c4.metric("Condition",   desc)
                         with st.spinner("Getting AI tip..."):
                             tip = call_groq([
-                                {"role": "system", "content": "Helpful weather assistant. Give a practical 2-line tip."},
-                                {"role": "user",   "content": f"Weather in {city_name}: {temp}{unit_sym}, {condition}, humidity {humidity}%. What to wear?"},
+                                {"role":"system","content":"Give a short 2-3 line practical weather tip."},
+                                {"role":"user",  "content":f"Weather: {temp}{unit_sym}, {desc}, humidity {humidity}%."}
                             ], "llama-3.1-8b-instant", 0.7, 200)
-                            st.info(f"💡 AI Tip: {tip}")
-
+                            st.info(f"💡 {tip}")
+                            st.components.v1.html(text_to_speech_html(tip), height=60)
                 except Exception as e:
-                    st.error(f"Something went wrong: {e}")
-
-
-# ─────────────────────────────────────────
-# FEATURE 5 — CODE ASSISTANT
-# ─────────────────────────────────────────
-
-elif "Code" in feature:
-    st.header("💻 Code Assistant")
-    st.caption("Write, debug, explain, and convert code")
-
-    action = st.selectbox("What do you need?", [
-        "✍️ Write code for me",
-        "🐛 Debug my code",
-        "📖 Explain this code",
-        "🔄 Convert to another language",
-        "⚡ Optimize my code",
-        "🧪 Write tests for my code",
-    ])
-
-    col1, col2 = st.columns(2)
-    lang        = col1.selectbox("Language", ["Python", "JavaScript", "Java", "C++", "SQL", "HTML/CSS", "React", "Other"])
-    target_lang = col2.selectbox("Convert TO", ["Python", "JavaScript", "Java", "C++", "SQL", "HTML/CSS", "React", "Other"]) if "Convert" in action else None
-
-    user_code = st.text_area("Describe what you want or paste your code here", height=200,
-                             placeholder="e.g. Write a function to check if a number is prime")
-
-    if st.button("🚀 Run", use_container_width=True):
-        if not user_code.strip():
-            st.warning("Please enter some code or a description.")
+                    st.error(f"Error: {e}")
         else:
+            st.warning("Please enter a city name!")
+
+
+# ══════════════════════════════════════════
+# FEATURE 6: CODE ASSISTANT
+# ══════════════════════════════════════════
+elif "Code" in feature:
+    st.markdown('<div class="sec-title">💻 Code Assistant</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-sub">Write, debug, explain and convert code</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="aura-card">', unsafe_allow_html=True)
+    code_action = st.selectbox("What do you want?", [
+        "✍️ Write code for me", "🐛 Debug my code", "📖 Explain this code",
+        "🔄 Convert to another language", "⚡ Optimize my code", "🧪 Write tests for my code",
+    ])
+    lang_options = ["Python","JavaScript","Java","C++","SQL","HTML/CSS","React","Other"]
+    col1, col2 = st.columns(2)
+    with col1: code_lang   = st.selectbox("Language", lang_options)
+    with col2: target_lang = st.selectbox("Convert TO", lang_options) if "Convert" in code_action else None
+    user_input = st.text_area("Describe what you want / Paste your code", height=180,
+                              placeholder="Write a function to sort a list in Python...")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    if st.button("✦ Run", use_container_width=True):
+        if user_input.strip():
             with st.spinner("Processing..."):
                 prompts = {
-                    "✍️ Write code for me":          f"Write clean, well-commented {lang} code for: {user_code}. Include example usage.",
-                    "🐛 Debug my code":              f"Debug this {lang} code and explain all issues:\n\n{user_code}",
-                    "📖 Explain this code":          f"Explain this {lang} code step by step in simple terms:\n\n{user_code}",
-                    "🔄 Convert to another language": f"Convert this {lang} code to {target_lang}:\n\n{user_code}",
-                    "⚡ Optimize my code":           f"Optimize this {lang} code for better performance:\n\n{user_code}",
-                    "🧪 Write tests for my code":    f"Write comprehensive unit tests for this {lang} code:\n\n{user_code}",
+                    "✍️ Write code for me":          f"Write clean {code_lang} code for: {user_input}.",
+                    "🐛 Debug my code":              f"Debug this {code_lang} code:\n\n{user_input}",
+                    "📖 Explain this code":          f"Explain this {code_lang} code:\n\n{user_input}",
+                    "🔄 Convert to another language":f"Convert {code_lang} to {target_lang}:\n\n{user_input}",
+                    "⚡ Optimize my code":           f"Optimize this {code_lang} code:\n\n{user_input}",
+                    "🧪 Write tests for my code":    f"Write unit tests for:\n\n{user_input}",
                 }
-                messages = [
-                    {"role": "system", "content": "You are an expert programmer. Provide clean, working code with clear explanations. Use markdown code blocks."},
-                    {"role": "user",   "content": prompts[action]},
-                ]
-                reply = call_groq(messages, model_id, temperature=0.3, max_tokens=max_tokens)
+                reply = call_groq([
+                    {"role":"system","content":"You are an expert programmer. Use markdown code blocks."},
+                    {"role":"user",  "content":prompts[code_action]}
+                ], selected_model, 0.3, max_tokens)
                 st.markdown(reply)
-                st.download_button("📥 Download", reply, file_name="aura_code.txt", mime="text/plain")
+                st.download_button("Download Response", reply,
+                                   file_name="aura_code.txt", mime="text/plain")
+        else:
+            st.warning("Please enter your code or description!")
+
+
+# ── FOOTER ──
+st.markdown("""
+<div class="aura-footer">
+    Built with ✦ by Rupal Darode &nbsp;|&nbsp; Aura AI &nbsp;|&nbsp; Powered by Groq + Pollinations
+</div>
+""", unsafe_allow_html=True)
