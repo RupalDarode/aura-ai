@@ -98,3 +98,19 @@ HF_CHAT_MODELS = {
     "Zephyr 7B Beta - chat": "HuggingFaceH4/zephyr-7b-beta",
     "Mistral 7B Instruct - balanced": "mistralai/Mistral-7B-Instruct-v0.2",
     "Llama 3.1 8B Instruct - strong": "meta-llama/Llama-3.1-8B-Instruct",
+}
+
+HF_STT_MODELS = {
+    "Whisper Small": "openai/whisper-small",
+    "Whisper Base": "openai/whisper-base",
+}
+
+HF_IMAGE_ANALYZER_MODELS = {
+    "BLIP Large Captioning": "Salesforce/blip-image-captioning-large",
+    "BLIP Base Captioning": "Salesforce/blip-image-captioning-base",
+}
+
+HF_IMAGE_GENERATION_MODELS = {
+    "Stable Diffusion XL": "stabilityai/stable-diffusion-xl-base-1.0",
+    "Stable Diffusion 2.1": "stabilityai/stable-diffusion-2-1",
+}
