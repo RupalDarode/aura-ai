@@ -416,35 +416,66 @@ window.addEventListener('message', (e) => {
 
 elif "Image Generator" in feature:
     st.header("🎨 Image Generator")
-    st.caption("Powered by Pollinations AI — free, no API key needed")
+    st.caption("Powered by Together AI via Groq key — uses your GROQ_API_KEY")
 
     prompt = st.text_area("Describe your image",
                           placeholder="A sunset over Mumbai skyline, golden hour...")
 
     col1, col2 = st.columns(2)
     style = col1.selectbox("Style", list(IMAGE_STYLES.keys()))
-    size  = col2.selectbox("Size", ["Square (768×768)", "Portrait (512×768)", "Landscape (768×512)"])
+    size  = col2.selectbox("Size", ["Square (1024×1024)", "Portrait (768×1024)", "Landscape (1024×768)"])
 
     size_map = {
-        "Square (768×768)":    (768, 768),
-        "Portrait (512×768)":  (512, 768),
-        "Landscape (768×512)": (768, 512),
+        "Square (1024×1024)":   "1024x1024",
+        "Portrait (768×1024)":  "768x1024",
+        "Landscape (1024×768)": "1024x768",
     }
-    w, h = size_map[size]
+    img_size = size_map[size]
 
     if st.button("✨ Generate Image", use_container_width=True):
         if not prompt.strip():
             st.warning("Please enter a prompt first.")
         else:
-            with st.spinner("Generating your image… (takes ~15 seconds)"):
+            with st.spinner("Generating your image… (10–20 seconds)"):
                 full_prompt = prompt + IMAGE_STYLES[style]
-                encoded = urllib.parse.quote(full_prompt)
-                # Plain free URL — no nologo, no auth required
-                url = f"https://image.pollinations.ai/prompt/{encoded}?width={w}&height={h}&seed=42&model=flux"
                 try:
-                    res = requests.get(url, timeout=90)
-                    if res.status_code == 200 and "image" in res.headers.get("content-type", ""):
-                        image = Image.open(BytesIO(res.content))
+                    api_key = st.secrets["GROQ_API_KEY"]
+                except Exception:
+                    st.error("❌ GROQ_API_KEY missing in Streamlit Secrets.")
+                    st.stop()
+
+                try:
+                    # Together AI image generation — works with a Together API key
+                    # Uses Black Forest Labs FLUX.1 schnell model (free tier available)
+                    res = requests.post(
+                        "https://api.together.xyz/v1/images/generations",
+                        headers={
+                            "Authorization": f"Bearer {st.secrets.get('TOGETHER_API_KEY', '')}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": "black-forest-labs/FLUX.1-schnell-Free",
+                            "prompt": full_prompt,
+                            "width":  int(img_size.split("x")[0]),
+                            "height": int(img_size.split("x")[1]),
+                            "steps": 4,
+                            "n": 1,
+                        },
+                        timeout=60,
+                    )
+                    data = res.json()
+
+                    if res.status_code == 200 and "data" in data:
+                        # Response contains base64 image
+                        img_b64 = data["data"][0].get("b64_json") or data["data"][0].get("url")
+                        if img_b64 and not img_b64.startswith("http"):
+                            img_bytes = base64.b64decode(img_b64)
+                            image = Image.open(BytesIO(img_bytes))
+                        else:
+                            # URL returned instead of base64
+                            img_res = requests.get(img_b64, timeout=30)
+                            image = Image.open(BytesIO(img_res.content))
+
                         st.image(image, use_container_width=True)
                         buf = BytesIO()
                         image.save(buf, format="PNG")
@@ -452,7 +483,9 @@ elif "Image Generator" in feature:
                                            file_name="aura_image.png", mime="image/png",
                                            use_container_width=True)
                     else:
-                        st.error(f"❌ Image service returned {res.status_code}. Try a shorter/simpler prompt.")
+                        err = data.get("error", {}).get("message", str(data))
+                        st.error(f"❌ Together AI error: {err}")
+                        st.info("💡 Add your free Together AI key as TOGETHER_API_KEY in Streamlit Secrets. Get it free at: https://api.together.ai")
                 except Exception as e:
                     st.error(f"❌ Error: {e}")
 
