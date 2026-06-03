@@ -1,33 +1,14 @@
-# ============================================================
-#  Aura AI  —  Final Fixed Version
-#  Built by Rupal Darode
-# ============================================================
-#
-#  SETUP: Streamlit Cloud → Settings → Secrets → paste:
-#
-#     GROQ_API_KEY = "gsk_xxxxxxxxxxxxxxxxxxxx"
-#
-#  Get FREE key: https://console.groq.com/keys
-#  No other tokens needed.
-# ============================================================
-
 import base64
 import io
-import base64
-import urllib.parse
 import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-import PyPDF2
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
 from PIL import Image
-from io import BytesIO
 
-# ── PAGE CONFIG ─────────────────────────────────────────────
-st.set_page_config(page_title="Aura AI", page_icon="✨", layout="wide")
 try:
     import PyPDF2
 except ImportError:
@@ -80,20 +61,6 @@ st.markdown(
 )
 
 
-st.markdown("""
-<style>
-  .stApp { background-color: #f9fafb; }
-  section[data-testid="stSidebar"] {
-    background-color: #ffffff;
-    border-right: 1px solid #e5e7eb;
-  }
-  .stChatMessage {
-    background-color: #ffffff !important;
-    border: 1px solid #e5e7eb;
-    border-radius: 10px;
-  }
-</style>
-""", unsafe_allow_html=True)
 HF_CHAT_MODELS = {
     "Zephyr 7B Beta - chat": "HuggingFaceH4/zephyr-7b-beta",
     "Mistral 7B Instruct - balanced": "mistralai/Mistral-7B-Instruct-v0.2",
@@ -113,4 +80,21 @@ HF_IMAGE_ANALYZER_MODELS = {
 HF_IMAGE_GENERATION_MODELS = {
     "Stable Diffusion XL": "stabilityai/stable-diffusion-xl-base-1.0",
     "Stable Diffusion 2.1": "stabilityai/stable-diffusion-2-1",
+}
+
+IMAGE_STYLES = {
+    "Natural": "",
+    "Realistic": ", realistic, highly detailed, natural lighting",
+    "Anime": ", anime style, vibrant, expressive",
+    "Oil Painting": ", oil painting, visible brush strokes",
+    "Watercolor": ", watercolor, soft colors",
+    "Cyberpunk": ", cyberpunk, neon, futuristic",
+    "Sketch": ", pencil sketch, clean linework",
+}
+
+LANGUAGE_RULES = {
+    "English": "Reply in English.",
+    "Hindi": "Reply in Hindi.",
+    "Hinglish": "Reply in Hinglish, mixing Hindi and English naturally.",
+    "Marathi": "Reply in Marathi.",
 }
