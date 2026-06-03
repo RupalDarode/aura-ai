@@ -15,6 +15,46 @@ st.markdown("""
     .stApp { background-color: #f9fafb; }
     section[data-testid="stSidebar"] { background-color: #ffffff; border-right: 1px solid #e5e7eb; }
     .stChatMessage { background-color: #ffffff !important; border: 1px solid #e5e7eb; border-radius: 10px; }
+
+    /* ── Inline attachment bar ── */
+    /* Hide the default file-uploader UI; we only show the clickable label */
+    .attachment-zone [data-testid="stFileUploader"] {
+        display: flex; align-items: center; gap: 0;
+    }
+    .attachment-zone [data-testid="stFileUploaderDropzone"] {
+        display: none !important;           /* hide the big drag-drop box */
+    }
+    .attachment-zone [data-testid="stFileUploaderDropzoneInstructions"] {
+        display: none !important;
+    }
+    /* Make the browse button look like a small icon button */
+    .attachment-zone [data-testid="stFileUploaderDropzone"] + div button,
+    .attachment-zone button[kind="secondary"] {
+        background: transparent !important;
+        border: none !important;
+        padding: 6px 10px !important;
+        font-size: 20px !important;
+        color: #6b7280 !important;
+        cursor: pointer;
+        border-radius: 8px;
+        transition: background 0.15s;
+    }
+    .attachment-zone button[kind="secondary"]:hover {
+        background: #f3f4f6 !important;
+        color: #111827 !important;
+    }
+    /* Pill badge showing active attachment */
+    .attach-badge {
+        display: inline-flex; align-items: center; gap: 6px;
+        background: #eff6ff; border: 1px solid #bfdbfe;
+        border-radius: 999px; padding: 3px 10px;
+        font-size: 12px; color: #1d4ed8; margin-bottom: 6px;
+    }
+    .attach-badge button {
+        background: none; border: none; cursor: pointer;
+        font-size: 13px; color: #6b7280; padding: 0 2px;
+        line-height: 1;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -238,39 +278,6 @@ if "AI Chat" in feature:
     if is_chat:
         st.caption(f"Model: {model_name}  |  Language: {language}")
 
-    # ── Attachment row ──────────────────────────────────────────────
-    # Two small uploaders side by side: PDF on left, voice on right
-    att1, att2 = st.columns(2)
-
-    with att1:
-        pdf_file = st.file_uploader("📎 Attach a PDF", type=["pdf"])
-        if pdf_file:
-            # Only re-read when a new file is attached
-            if st.session_state.get("pdf_name") != pdf_file.name:
-                with st.spinner("Reading PDF..."):
-                    text = extract_pdf_text(pdf_file)
-                if text.startswith("ERROR"):
-                    st.error(text)
-                else:
-                    st.session_state.pdf_context = text
-                    st.session_state.pdf_name    = pdf_file.name
-                    st.success(f"✅ PDF loaded: {pdf_file.name}")
-        if st.session_state.get("pdf_context"):
-            st.caption("📄 PDF attached — I'll answer questions about it")
-
-    with att2:
-        audio_file = st.file_uploader("🎤 Voice message (.wav / .mp3)", type=["wav", "mp3", "m4a"])
-        if audio_file:
-            with st.spinner("Transcribing your voice..."):
-                transcript = transcribe_audio_hf(audio_file.read())
-            if transcript and not transcript.startswith(("❌", "⏳")):
-                st.session_state.voice_prefill = transcript
-                st.success(f"🎤 Heard: {transcript}")
-            else:
-                st.warning(transcript)
-
-    st.divider()
-
     # ── Message history ─────────────────────────────────────────────
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -281,16 +288,78 @@ if "AI Chat" in feature:
             if isinstance(content, str):
                 st.markdown(content)
             else:
-                # Multimodal content — show text parts only
                 for part in content:
                     if part.get("type") == "text":
                         st.markdown(part["text"])
 
-    # ── Chat input (pre-filled from voice if available) ─────────────
-    prefill    = st.session_state.pop("voice_prefill", "")
-    user_input = st.chat_input(prefill or "Type your message...")
-    if not user_input and prefill:
-        user_input = prefill   # use voice text if user didn't type anything
+    # ── Active attachment badges (shown above input bar) ────────────
+    # These appear as small pills when a PDF or voice is loaded
+    badge_cols = st.columns([6, 1, 1])
+    with badge_cols[0]:
+        if st.session_state.get("pdf_context"):
+            pdf_name = st.session_state.get("pdf_name", "document.pdf")
+            st.markdown(f'<div class="attach-badge">📄 {pdf_name}</div>', unsafe_allow_html=True)
+        if st.session_state.get("voice_prefill"):
+            st.markdown('<div class="attach-badge">🎤 Voice message ready</div>', unsafe_allow_html=True)
+
+    # ── Input bar: [📎] [🎤] [_____chat input_____] ─────────────────
+    # Three columns: two tiny icon columns + wide chat input column
+    # This makes it look like the icons are part of the input bar.
+    icon_col1, icon_col2, input_col = st.columns([0.5, 0.5, 9])
+
+    with icon_col1:
+        # 📎 PDF button — clicking opens a hidden file uploader below
+        if st.button("📎", help="Attach a PDF", use_container_width=True):
+            st.session_state.show_pdf_uploader   = not st.session_state.get("show_pdf_uploader", False)
+            st.session_state.show_voice_uploader = False   # close the other one
+
+    with icon_col2:
+        # 🎤 Voice button — clicking opens a hidden audio uploader below
+        if st.button("🎤", help="Upload voice message", use_container_width=True):
+            st.session_state.show_voice_uploader = not st.session_state.get("show_voice_uploader", False)
+            st.session_state.show_pdf_uploader   = False
+
+    with input_col:
+        prefill    = st.session_state.pop("voice_prefill", "")
+        user_input = st.chat_input(prefill or "Type your message...")
+        if not user_input and prefill:
+            user_input = prefill
+
+    # ── Hidden uploaders — only visible when icon is clicked ─────────
+    with st.container():
+        st.markdown('<div class="attachment-zone">', unsafe_allow_html=True)
+
+        if st.session_state.get("show_pdf_uploader"):
+            pdf_file = st.file_uploader("Choose a PDF file", type=["pdf"],
+                                        label_visibility="collapsed", key="pdf_uploader")
+            if pdf_file:
+                if st.session_state.get("pdf_name") != pdf_file.name:
+                    with st.spinner("Reading PDF..."):
+                        text = extract_pdf_text(pdf_file)
+                    if text.startswith("ERROR"):
+                        st.error(text)
+                    else:
+                        st.session_state.pdf_context        = text
+                        st.session_state.pdf_name           = pdf_file.name
+                        st.session_state.show_pdf_uploader  = False   # auto-close after upload
+                        st.success(f"✅ PDF attached: {pdf_file.name}")
+                        st.rerun()
+
+        if st.session_state.get("show_voice_uploader"):
+            audio_file = st.file_uploader("Choose an audio file", type=["wav", "mp3", "m4a"],
+                                          label_visibility="collapsed", key="audio_uploader")
+            if audio_file:
+                with st.spinner("Transcribing your voice..."):
+                    transcript = transcribe_audio_hf(audio_file.read())
+                if transcript and not transcript.startswith(("❌", "⏳")):
+                    st.session_state.voice_prefill        = transcript
+                    st.session_state.show_voice_uploader  = False   # auto-close
+                    st.success(f"🎤 Heard: «{transcript}»")
+                    st.rerun()
+                else:
+                    st.warning(transcript)
+
+        st.markdown('</div>', unsafe_allow_html=True)
 
     if user_input:
         st.session_state.messages.append({"role": "user", "content": user_input})
