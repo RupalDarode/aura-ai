@@ -269,208 +269,160 @@ if "AI Chat" in feature:
         pdf_name = st.session_state.get("pdf_name", "document.pdf")
         st.markdown(f'<div class="attach-badge">📄 {pdf_name} — PDF loaded</div>', unsafe_allow_html=True)
 
-    # ── 🎤 Voice-to-Text widget (Web Speech API — uses browser mic) ──
-    # This HTML component:
-    #   • Shows a mic button the user clicks to start speaking
-    #   • Uses the browser's built-in SpeechRecognition (no API key needed)
-    #   • Sends the transcript back to Streamlit via postMessage
-    # It also handles Text-to-Speech: Streamlit sends the reply text
-    # back to the component and it reads it aloud using speechSynthesis.
-    voice_html = """
-    <style>
-      body { margin: 0; font-family: sans-serif; background: transparent; }
-      #voice-bar {
-        display: flex; align-items: center; gap: 10px;
-        background: #f9fafb; border: 1px solid #e5e7eb;
-        border-radius: 12px; padding: 8px 14px;
-        width: fit-content;
-      }
-      #mic-btn {
-        width: 38px; height: 38px; border-radius: 50%;
-        border: none; cursor: pointer; font-size: 18px;
-        background: #f3f4f6; transition: all 0.2s;
-        display: flex; align-items: center; justify-content: center;
-      }
-      #mic-btn.listening {
-        background: #fee2e2; animation: pulse 1s infinite;
-      }
-      @keyframes pulse {
-        0%,100% { transform: scale(1); }
-        50%      { transform: scale(1.15); }
-      }
-      #status { font-size: 13px; color: #6b7280; min-width: 160px; }
-      #transcript-box {
-        font-size: 13px; color: #111827;
-        background: #fff; border: 1px solid #d1d5db;
-        border-radius: 8px; padding: 6px 10px;
-        min-width: 220px; display: none;
-      }
-      #send-btn {
-        padding: 6px 14px; border-radius: 8px; border: none;
-        background: #2563eb; color: white; font-size: 13px;
-        cursor: pointer; display: none;
-      }
-      #send-btn:hover { background: #1d4ed8; }
-    </style>
+    # ── Compact input row: [📎] [🎤 mic widget] [──── chat input ────] ──
+    # The mic widget is a tiny inline HTML component — just the icon button.
+    # When clicked: it records → shows transcript inside the widget →
+    # user clicks ✅ → text drops into the voice_text box below →
+    # pressing Enter sends it. TTS reads replies aloud automatically.
 
-    <div id="voice-bar">
-      <button id="mic-btn" title="Click to speak">🎤</button>
-      <span id="status">Click mic to speak</span>
-      <div id="transcript-box"></div>
-      <button id="send-btn">Send ↗</button>
-    </div>
+    left_col, right_col = st.columns([2.2, 8])
 
-    <script>
-    const micBtn        = document.getElementById('mic-btn');
-    const statusEl      = document.getElementById('status');
-    const transcriptBox = document.getElementById('transcript-box');
-    const sendBtn       = document.getElementById('send-btn');
+    with left_col:
+        # Single HTML component holds BOTH 📎 and 🎤 as small icon buttons
+        # side by side — compact, no extra rows
+        components.html("""
+<style>
+  body { margin:0; padding:0; background:transparent; }
+  .bar {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 0;
+  }
+  .icon-btn {
+    width: 36px; height: 36px; border-radius: 50%;
+    border: 1px solid #e5e7eb; background: #f9fafb;
+    font-size: 16px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s;
+  }
+  .icon-btn:hover { background: #f3f4f6; }
+  .icon-btn.listening { background: #fee2e2; animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.13)} }
+  .tooltip {
+    font-size: 11px; color: #9ca3af;
+    white-space: nowrap; display: none;
+  }
+  .bar:has(#mic-btn.listening) .tooltip { display: inline; color: #ef4444; }
+</style>
 
-    let recognition = null;
-    let finalText   = '';
+<div class="bar">
 
-    // ── Check browser support ──────────────────────────────────────
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      statusEl.textContent = '⚠️ Browser not supported. Use Chrome.';
-      micBtn.disabled = true;
-    } else {
-      recognition = new SpeechRecognition();
-      recognition.lang        = 'en-US';  // change to 'hi-IN' for Hindi
-      recognition.interimResults = true;  // show live partial results
-      recognition.continuous     = false;
+  <!-- 📎 PDF button — triggers file input -->
+  <label for="pdf-input" class="icon-btn" title="Attach PDF">📎</label>
+  <input id="pdf-input" type="file" accept=".pdf"
+         style="display:none"
+         onchange="sendPdf(this)">
 
-      recognition.onstart = () => {
-        micBtn.classList.add('listening');
-        micBtn.textContent     = '⏹';
-        statusEl.textContent   = '🔴 Listening...';
-        transcriptBox.style.display = 'none';
-        sendBtn.style.display       = 'none';
-        finalText = '';
-      };
+  <!-- 🎤 Mic button -->
+  <button id="mic-btn" class="icon-btn" title="Speak a message">🎤</button>
 
-      recognition.onresult = (event) => {
-        let interim = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const t = event.results[i][0].transcript;
-          if (event.results[i].isFinal) finalText += t;
-          else interim += t;
-        }
-        // Show live transcript while speaking
-        transcriptBox.style.display = 'block';
-        transcriptBox.textContent   = finalText || interim;
-      };
+  <span class="tooltip" id="tip">Listening…</span>
+</div>
 
-      recognition.onend = () => {
-        micBtn.classList.remove('listening');
-        micBtn.textContent = '🎤';
-        if (finalText.trim()) {
-          statusEl.textContent      = '✅ Got it!';
-          transcriptBox.textContent = finalText;
-          sendBtn.style.display     = 'inline-block';
-        } else {
-          statusEl.textContent        = 'Click mic to speak';
-          transcriptBox.style.display = 'none';
-        }
-      };
+<script>
+// ── PDF: read file → send base64 to Streamlit via postMessage ───
+function sendPdf(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    window.parent.postMessage({
+      type: 'pdf_upload',
+      name: file.name,
+      data: reader.result   // data:application/pdf;base64,...
+    }, '*');
+  };
+  reader.readAsDataURL(file);
+}
 
-      recognition.onerror = (e) => {
-        micBtn.classList.remove('listening');
-        micBtn.textContent   = '🎤';
-        statusEl.textContent = '❌ ' + e.error + '. Try again.';
-      };
+// ── Mic: Web Speech API ─────────────────────────────────────────
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const micBtn = document.getElementById('mic-btn');
+const tip    = document.getElementById('tip');
 
-      // Toggle mic on button click
-      micBtn.addEventListener('click', () => {
-        if (micBtn.classList.contains('listening')) {
-          recognition.stop();
-        } else {
-          recognition.start();
-        }
-      });
+if (!SR) {
+  micBtn.title = 'Not supported — use Chrome';
+  micBtn.style.opacity = '0.4';
+} else {
+  const rec = new SR();
+  rec.lang           = 'en-US';
+  rec.interimResults = true;
+  rec.continuous     = false;
 
-      // Send transcript to Streamlit when user clicks Send
-      sendBtn.addEventListener('click', () => {
-        if (finalText.trim()) {
-          // postMessage sends data from this iframe → parent Streamlit page
-          window.parent.postMessage({
-            type: 'voice_transcript',
-            text: finalText.trim()
-          }, '*');
-          statusEl.textContent        = '📨 Sent!';
-          sendBtn.style.display       = 'none';
-          transcriptBox.style.display = 'none';
-          finalText = '';
-        }
-      });
+  let finalText = '';
+
+  rec.onstart  = () => { micBtn.classList.add('listening'); micBtn.textContent='⏹'; finalText=''; };
+  rec.onresult = (e) => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      e.results[i].isFinal ? finalText += t : interim += t;
     }
+    tip.textContent = finalText || interim;
+    tip.style.display = 'inline';
+  };
+  rec.onend = () => {
+    micBtn.classList.remove('listening');
+    micBtn.textContent = '🎤';
+    if (finalText.trim()) {
+      window.parent.postMessage({ type: 'voice_transcript', text: finalText.trim() }, '*');
+      tip.textContent = '✅ Sent!';
+      setTimeout(() => { tip.style.display='none'; tip.textContent='Listening…'; }, 1500);
+    } else {
+      tip.style.display = 'none';
+    }
+  };
+  rec.onerror = (e) => {
+    micBtn.classList.remove('listening');
+    micBtn.textContent = '🎤';
+    tip.textContent = '❌ ' + e.error;
+    tip.style.display = 'inline';
+  };
 
-    // ── Text-to-Speech: listen for reply from Streamlit ───────────
-    // Streamlit sends a message with { type: 'tts', text: '...' }
-    window.addEventListener('message', (event) => {
-      if (event.data && event.data.type === 'tts' && event.data.text) {
-        const utter = new SpeechSynthesisUtterance(event.data.text);
-        utter.lang  = 'en-US';
-        utter.rate  = 1.0;
-        window.speechSynthesis.cancel();   // stop any ongoing speech
-        window.speechSynthesis.speak(utter);
-        statusEl.textContent = '🔊 Speaking...';
-        utter.onend = () => { statusEl.textContent = 'Click mic to speak'; };
-      }
-    });
-    </script>
-    """
+  micBtn.addEventListener('click', () => {
+    micBtn.classList.contains('listening') ? rec.stop() : rec.start();
+  });
+}
 
-    # Render the voice widget — height is just enough for the bar
-    components.html(voice_html, height=65)
+// ── TTS: speak Aura's reply when Streamlit sends it ────────────
+window.addEventListener('message', (e) => {
+  if (e.data?.type === 'tts' && e.data.text) {
+    const u = new SpeechSynthesisUtterance(e.data.text);
+    u.lang = 'en-US'; u.rate = 1.0;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  }
+});
+</script>
+""", height=48)
 
-    # ── Receive transcript from the voice widget ────────────────────
-    # The Web Speech widget posts a message to the parent page.
-    # We capture it via a small JS bridge that writes to a Streamlit
-    # text_input hidden behind the voice bar.
-    # Simpler approach: use a query-param trick — the widget sends
-    # transcript via postMessage; we catch it with a hidden st.text_input
-    # that the user can also use directly.
+    with right_col:
+        user_input = st.chat_input("Type or use the mic…")
 
-    # Show a small text box that auto-fills from voice
-    voice_text = st.text_input(
-        "🎤 Voice transcript (auto-filled after speaking, or type here):",
-        key="voice_input_box",
-        placeholder="Your spoken words appear here...",
-        label_visibility="collapsed",
-    )
+    # Voice transcript arrives as a query param written by postMessage.
+    # We capture it with a hidden text_input that the JS widget fills.
+    voice_text = st.text_input("voice", key="voice_input_box",
+                               label_visibility="collapsed",
+                               placeholder="Voice transcript appears here — press Enter to send")
 
-    st.caption("👆 Speak → click Send in the mic widget → text appears above → press Enter to chat")
-
-    # ── [📎 PDF]  [___ main chat input ___] ────────────────────────
-    pdf_col, chat_col = st.columns([0.8, 9])
-
-    with pdf_col:
-        if st.button("📎", help="Attach a PDF", use_container_width=True):
-            st.session_state.show_pdf_uploader = not st.session_state.get("show_pdf_uploader", False)
-
-    with chat_col:
-        # Use voice text if available, otherwise wait for typed input
-        prefill    = voice_text or st.session_state.pop("voice_prefill", "")
-        user_input = st.chat_input("Type your message...")
-
-    # Use whichever input came in — typed chat input takes priority
-    final_input = user_input or (voice_text if voice_text else None)
-
-    # PDF uploader — slides open when 📎 is clicked
+    # PDF uploader triggered by 📎 click (postMessage can't directly trigger
+    # Streamlit file dialogs, so we keep a fallback native uploader hidden
+    # behind a toggle — the HTML label+input above handles it in-browser)
     if st.session_state.get("show_pdf_uploader"):
-        pdf_file = st.file_uploader("Choose a PDF", type=["pdf"],
+        pdf_file = st.file_uploader("PDF", type=["pdf"],
                                     label_visibility="collapsed", key="pdf_uploader")
         if pdf_file and st.session_state.get("pdf_name") != pdf_file.name:
             with st.spinner("Reading PDF..."):
                 text = extract_pdf_text(pdf_file)
-            if text.startswith("ERROR"):
-                st.error(text)
-            else:
+            if not text.startswith("ERROR"):
                 st.session_state.pdf_context       = text
                 st.session_state.pdf_name          = pdf_file.name
                 st.session_state.show_pdf_uploader = False
                 st.rerun()
+            else:
+                st.error(text)
+
+    # Pick whichever input arrived — typed chat takes priority over voice box
+    final_input = user_input or (voice_text.strip() if voice_text else None)
 
     if final_input:
         st.session_state.messages.append({"role": "user", "content": final_input})
