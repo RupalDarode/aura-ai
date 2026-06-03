@@ -45,13 +45,11 @@ LANGUAGES = {
 }
 
 IMAGE_STYLES = {
-    "None":          "",
-    "Realistic":     ", ultra realistic, photographic, 8k",
-    "Anime":         ", anime style, vibrant, Studio Ghibli",
-    "Oil Painting":  ", oil painting, detailed brushwork",
-    "Cyberpunk":     ", cyberpunk, neon lights, futuristic",
-    "Watercolor":    ", watercolor, soft colors, artistic",
-    "Sketch":        ", pencil sketch, hand drawn",
+    "photorealistic" : "photorealistic, 8k uhd, RAW photo, sharp focus, perfect eyes",
+    "cinematic"      : "cinematic, movie still, dramatic lighting, bokeh, 8k",
+    "digital art"    : "digital art, highly detailed, artstation, concept art, 4k",
+    "cartoon"        : "cartoon style, pixar, vibrant colors, highly detailed, 4k",
+    "fashion"        : "vogue magazine, fashion photography, studio lighting, 8k"
 }
 
 
@@ -90,26 +88,74 @@ def call_groq(messages, model, temperature=0.7, max_tokens=1000):
 # (No API key needed, no blocked domains)
 # ─────────────────────────────────────────
 
-def generate_image(prompt: str) -> Image.Image | None:
-    """
-    Generate image via Pollinations.ai — completely free, no key needed.
-    Uses a different subdomain (image.pollinations.ai) which is NOT blocked.
-    The old free tier still works when nologo=true is NOT used.
-    """
+def detect_intent(user_input):
+    text = user_input.lower()
+    image_keywords = [
+        "generate image", "create image", "make image",
+        "draw", "create a picture", "generate a picture",
+        "show me", "image of", "picture of",
+        "draw me", "create me", "create art", "generate art"
+    ]
+    if any(kw in text for kw in image_keywords):
+        return "image"
+    return "chat"
+
+# Extract clean prompt from user message
+def extract_image_prompt(user_input):
+    text = user_input.lower()
+    remove_words = [
+        "generate image of", "create image of", "make image of",
+        "generate image", "create image", "make image",
+        "draw me a", "draw me an", "draw me", "draw a", "draw an", "draw",
+        "create a picture of", "generate a picture of",
+        "show me a", "show me an", "show me",
+        "image of", "picture of",
+        "create art of", "generate art of",
+        "create me a", "create me an", "create me"
+    ]
+    prompt = text
+    for word in remove_words:
+        prompt = prompt.replace(word, "")
+
+    detected_style = "photorealistic"
+    for style in STYLES.keys():
+        if style in text:
+            detected_style = style
+            prompt = prompt.replace(style, "")
+
+    return prompt.strip(), detected_style
+    print("✅ Styles and intent detection ready!")
+
+
+def generate_image(prompt, style):
     try:
-        encoded = urllib.parse.quote(prompt)
-        # Use the simple GET endpoint — no auth, no payment required
-        url = f"https://image.pollinations.ai/prompt/{encoded}?width=768&height=768&seed=42&model=flux"
-        res = requests.get(url, timeout=90)
-        if res.status_code == 200 and res.headers.get("content-type", "").startswith("image"):
-            return Image.open(BytesIO(res.content))
+        final_prompt = f"{prompt}, {STYLES[style]}, masterpiece, best quality"
+        encoded      = quote(final_prompt)
+        seed_val     = int(time.time())
+
+        url = (
+            f"https://image.pollinations.ai/prompt/{encoded}"
+            f"?width=768&height=1024"
+            f"&nologo=true&seed={seed_val}"
+        )
+
+        print(f"⏳ Generating: {prompt[:50]}...")
+        response = requests.get(url, timeout=240)
+
+        if response.status_code == 200:
+            image = Image.open(BytesIO(response.content))
+            image.save(f"output_{int(time.time())}.png")
+            print("✅ Image done!")
+            return image
         else:
-            st.error(f"❌ Image service error {res.status_code}. Try a different prompt or style.")
+            print(f"❌ Failed: {response.status_code}")
             return None
+
     except Exception as e:
-        st.error(f"❌ Failed to generate image: {e}")
+        print(f"❌ Error: {e}")
         return None
 
+print("✅ Image function ready!")
 
 # ─────────────────────────────────────────
 # HELPER: IMAGE ANALYSIS — Groq vision
