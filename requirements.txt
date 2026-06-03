@@ -1,4 +1,5 @@
 streamlit
 requests
-Pillow
+pillow
 PyPDF2
+python-docx
