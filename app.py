@@ -8,16 +8,8 @@ import io
 import PyPDF2
 from datetime import datetime
 
-# ─────────────────────────────────────────
-# PAGE CONFIG
-# ─────────────────────────────────────────
-st.set_page_config(
-    page_title="Aura AI",
-    page_icon="✨",
-    layout="wide"
-)
+st.set_page_config(page_title="Aura AI", page_icon="✨", layout="wide")
 
-# Minimal CSS — just light background tweaks, no heavy overrides
 st.markdown("""
 <style>
     .stApp { background-color: #f9fafb; }
@@ -26,17 +18,21 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ── CONSTANTS ──────────────────────────────────────────────────────────────────
 
-# ─────────────────────────────────────────
-# CONSTANTS
-# ─────────────────────────────────────────
+GROQ_MODELS = {
+    "⚡ Llama 3.1 8B  — Fast":      "llama-3.1-8b-instant",
+    "🧠 Llama 3.3 70B — Smart":     "llama-3.3-70b-versatile",
+    "💎 Mixtral 8x7B  — Balanced":  "mixtral-8x7b-32768",
+    "🔬 Gemma 2 9B    — Google":    "gemma2-9b-it",
+    "🚀 DeepSeek R1   — Reasoning": "deepseek-r1-distill-llama-70b",
+}
 
-MODELS = {
-    "⚡ Llama 3.1 8B  — Fast":       "llama-3.1-8b-instant",
-    "🧠 Llama 3.3 70B — Smart":      "llama-3.3-70b-versatile",
-    "💎 Mixtral 8x7B  — Balanced":   "mixtral-8x7b-32768",
-    "🔬 Gemma 2 9B    — Google":     "gemma2-9b-it",
-    "🚀 DeepSeek R1   — Reasoning":  "deepseek-r1-distill-llama-70b",
+# Free Hugging Face image generation models
+HF_IMAGE_MODELS = {
+    "Stable Diffusion XL":   "stabilityai/stable-diffusion-xl-base-1.0",
+    "Stable Diffusion 2.1":  "stabilityai/stable-diffusion-2-1",
+    "Dreamlike Photoreal 2": "dreamlike-art/dreamlike-photoreal-2.0",
 }
 
 LANGUAGES = {
@@ -47,98 +43,143 @@ LANGUAGES = {
 }
 
 IMAGE_STYLES = {
-    "None":        "",
-    "Realistic":   ", ultra realistic, 8k, cinematic lighting",
-    "Anime":       ", anime style, vibrant colors, Studio Ghibli",
-    "Oil Painting":  ", oil painting, detailed brushwork, museum quality",
-    "Cyberpunk":   ", cyberpunk, neon lights, futuristic city",
-    "Watercolor":  ", watercolor art, soft colors, artistic",
-    "Sketch":      ", pencil sketch, hand drawn, detailed",
+    "None":          "",
+    "Realistic":     ", ultra realistic, photographic, 8k",
+    "Anime":         ", anime style, vibrant, Studio Ghibli",
+    "Oil Painting":  ", oil painting, detailed brushwork",
+    "Cyberpunk":     ", cyberpunk, neon lights, futuristic",
+    "Watercolor":    ", watercolor, soft colors, artistic",
+    "Sketch":        ", pencil sketch, hand drawn",
 }
 
 
-# ─────────────────────────────────────────
-# CORE HELPER: CALL GROQ API
-# ─────────────────────────────────────────
+# ── HELPER: GROQ (text AI) ─────────────────────────────────────────────────────
 
 def call_groq(messages, model, temperature=0.7, max_tokens=1000):
-    """Send messages to Groq and return the reply text."""
+    """Send messages to Groq and return reply string."""
     try:
         api_key = st.secrets["GROQ_API_KEY"]
     except Exception:
-        return "❌ GROQ_API_KEY missing. Add it in Settings → Secrets."
-
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    body = {
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }
+        return "❌ GROQ_API_KEY missing. Add it in Streamlit Settings → Secrets."
 
     try:
         res = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
-            headers=headers, json=body, timeout=30
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens},
+            timeout=30,
         )
         data = res.json()
-
         if "choices" in data:
             return data["choices"][0]["message"]["content"]
         elif "error" in data:
-            return f"❌ API Error: {data['error']['message']}"
-        else:
-            return f"❌ Unexpected response: {data}"
-
+            return f"❌ Groq Error: {data['error']['message']}"
+        return f"❌ Unexpected response: {data}"
     except requests.exceptions.Timeout:
         return "⏱ Request timed out. Please try again."
     except Exception as e:
         return f"❌ Error: {str(e)}"
 
 
-# ─────────────────────────────────────────
-# REUSABLE CHAT UI
-# ─────────────────────────────────────────
+# ── HELPER: HF IMAGE GENERATION ───────────────────────────────────────────────
 
-def show_chat(system_prompt, model, temperature, max_tokens):
-    """Display the full chat interface with message history."""
+def generate_image_hf(prompt, model_id):
+    """Call Hugging Face Inference API. Returns PIL Image or None."""
+    try:
+        hf_token = st.secrets["HF_TOKEN"]
+    except Exception:
+        st.error("❌ HF_TOKEN missing. Add your Hugging Face token in Streamlit Secrets.")
+        return None
 
-    # Start fresh message list if none exists
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    # Show all previous messages
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-
-    # Chat input box at the bottom
-    user_input = st.chat_input("Type your message...")
-
-    if user_input:
-        # Save and show the user message
-        st.session_state.messages.append({"role": "user", "content": user_input})
-        with st.chat_message("user"):
-            st.markdown(user_input)
-
-        # Build the full message list: system prompt + history
-        full_messages = [{"role": "system", "content": system_prompt}] + st.session_state.messages
-
-        # Get and show the AI reply
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                reply = call_groq(full_messages, model, temperature, max_tokens)
-                st.markdown(reply)
-
-        st.session_state.messages.append({"role": "assistant", "content": reply})
+    url = f"https://api-inference.huggingface.co/models/{model_id}"
+    try:
+        res = requests.post(
+            url,
+            headers={"Authorization": f"Bearer {hf_token}"},
+            json={"inputs": prompt},
+            timeout=60,
+        )
+        if res.status_code == 200:
+            return Image.open(BytesIO(res.content))
+        elif res.status_code == 503:
+            st.warning("⏳ Model is loading on Hugging Face — wait 20 seconds and try again.")
+        else:
+            st.error(f"❌ HF Error {res.status_code}: {res.text[:200]}")
+        return None
+    except Exception as e:
+        st.error(f"❌ Image generation failed: {e}")
+        return None
 
 
-# ─────────────────────────────────────────
-# SIDEBAR
-# ─────────────────────────────────────────
+# ── HELPER: HF IMAGE CAPTIONING (BLIP) ────────────────────────────────────────
+
+def analyze_image_hf(image: Image.Image) -> str:
+    """Use HF BLIP to caption an image. Returns string."""
+    try:
+        hf_token = st.secrets["HF_TOKEN"]
+    except Exception:
+        return "❌ HF_TOKEN missing."
+
+    buf = BytesIO()
+    image.save(buf, format="PNG")
+
+    try:
+        res = requests.post(
+            "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-large",
+            headers={"Authorization": f"Bearer {hf_token}"},
+            data=buf.getvalue(),
+            timeout=30,
+        )
+        if res.status_code == 200:
+            result = res.json()
+            if isinstance(result, list) and result:
+                return result[0].get("generated_text", "No caption returned.")
+            return str(result)
+        elif res.status_code == 503:
+            return "⏳ Vision model is loading. Try again in 20 seconds."
+        return f"❌ HF Error {res.status_code}: {res.text[:200]}"
+    except Exception as e:
+        return f"❌ Error: {e}"
+
+
+# ── HELPER: HF WHISPER (voice to text) ────────────────────────────────────────
+
+def transcribe_audio_hf(audio_bytes: bytes) -> str:
+    """Send audio to Whisper on HF. Returns transcribed text."""
+    try:
+        hf_token = st.secrets["HF_TOKEN"]
+    except Exception:
+        return "❌ HF_TOKEN missing."
+
+    try:
+        res = requests.post(
+            "https://api-inference.huggingface.co/models/openai/whisper-large-v3",
+            headers={"Authorization": f"Bearer {hf_token}"},
+            data=audio_bytes,
+            timeout=60,
+        )
+        if res.status_code == 200:
+            return res.json().get("text", "")
+        elif res.status_code == 503:
+            return "⏳ Whisper model loading. Try again shortly."
+        return f"❌ Whisper Error {res.status_code}: {res.text[:200]}"
+    except Exception as e:
+        return f"❌ Transcription error: {e}"
+
+
+# ── HELPER: PDF TEXT EXTRACTION ────────────────────────────────────────────────
+
+def extract_pdf_text(pdf_file) -> str:
+    """Read PDF and return extracted text (max 8000 chars)."""
+    try:
+        reader = PyPDF2.PdfReader(io.BytesIO(pdf_file.read()))
+        text = "".join(page.extract_text() or "" for page in reader.pages)
+        return text[:8000]
+    except Exception as e:
+        return f"ERROR: {e}"
+
+
+# ── SIDEBAR ────────────────────────────────────────────────────────────────────
 
 with st.sidebar:
     st.title("✨ Aura AI")
@@ -149,104 +190,167 @@ with st.sidebar:
         "💬 AI Chat",
         "🎨 Image Generator",
         "🖼 Image Analyzer",
-        "📄 PDF Chat",
         "🌤 Weather",
         "💻 Code Assistant",
     ])
 
     st.divider()
 
-    # These settings only matter for chat-based features
-    is_chat_feature = any(x in feature for x in ["Chat", "Code", "PDF"])
+    # Show model/language settings only for chat-based features
+    is_chat = any(x in feature for x in ["Chat", "Code"])
 
-    if is_chat_feature:
-        model_name = st.selectbox("Model", list(MODELS.keys()))
-        model_id   = MODELS[model_name]
-
-        language   = st.selectbox("Language", list(LANGUAGES.keys()))
-        lang_rule  = LANGUAGES[language]
-
+    if is_chat:
+        model_name  = st.selectbox("Model", list(GROQ_MODELS.keys()))
+        model_id    = GROQ_MODELS[model_name]
+        language    = st.selectbox("Language", list(LANGUAGES.keys()))
+        lang_rule   = LANGUAGES[language]
         temperature = st.slider("Creativity", 0.1, 1.0, 0.7)
-        max_tokens  = st.slider("Max Tokens",  100, 4000, 1000)
+        max_tokens  = st.slider("Max Tokens", 100, 4000, 1000)
 
         if st.button("🗑 Clear Chat"):
-            for key in ["messages", "pdf_text"]:
-                st.session_state.pop(key, None)
+            st.session_state.pop("messages", None)
+            st.session_state.pop("pdf_context", None)
             st.rerun()
 
-        # Export chat as a text file
         if st.session_state.get("messages"):
             lines = [
                 f"{'You' if m['role'] == 'user' else 'Aura'}: {m['content']}"
                 for m in st.session_state.messages
+                if isinstance(m["content"], str)
             ]
             st.download_button(
-                "📥 Export Chat",
-                data="\n\n".join(lines),
+                "📥 Export Chat", "\n\n".join(lines),
                 file_name=f"aura_chat_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
                 mime="text/plain",
             )
+    else:
+        # Safe defaults so variables exist throughout the script
+        model_id    = GROQ_MODELS["⚡ Llama 3.1 8B  — Fast"]
+        lang_rule   = LANGUAGES["English"]
+        temperature = 0.7
+        max_tokens  = 1000
 
 
-# ─────────────────────────────────────────
-# FEATURE 1 — AI CHAT
-# ─────────────────────────────────────────
+# ── FEATURE 1: AI CHAT (with PDF attachment + voice) ──────────────────────────
 
 if "AI Chat" in feature:
     st.header("💬 AI Chat")
-    st.caption(f"Model: {model_name}  |  Language: {language}")
+    if is_chat:
+        st.caption(f"Model: {model_name}  |  Language: {language}")
 
-    system_prompt = f"You are Aura, a helpful and friendly AI assistant. {lang_rule}"
-    show_chat(system_prompt, model_id, temperature, max_tokens)
+    # ── Attachment row ──────────────────────────────────────────────
+    # Two small uploaders side by side: PDF on left, voice on right
+    att1, att2 = st.columns(2)
+
+    with att1:
+        pdf_file = st.file_uploader("📎 Attach a PDF", type=["pdf"])
+        if pdf_file:
+            # Only re-read when a new file is attached
+            if st.session_state.get("pdf_name") != pdf_file.name:
+                with st.spinner("Reading PDF..."):
+                    text = extract_pdf_text(pdf_file)
+                if text.startswith("ERROR"):
+                    st.error(text)
+                else:
+                    st.session_state.pdf_context = text
+                    st.session_state.pdf_name    = pdf_file.name
+                    st.success(f"✅ PDF loaded: {pdf_file.name}")
+        if st.session_state.get("pdf_context"):
+            st.caption("📄 PDF attached — I'll answer questions about it")
+
+    with att2:
+        audio_file = st.file_uploader("🎤 Voice message (.wav / .mp3)", type=["wav", "mp3", "m4a"])
+        if audio_file:
+            with st.spinner("Transcribing your voice..."):
+                transcript = transcribe_audio_hf(audio_file.read())
+            if transcript and not transcript.startswith(("❌", "⏳")):
+                st.session_state.voice_prefill = transcript
+                st.success(f"🎤 Heard: {transcript}")
+            else:
+                st.warning(transcript)
+
+    st.divider()
+
+    # ── Message history ─────────────────────────────────────────────
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            content = msg["content"]
+            if isinstance(content, str):
+                st.markdown(content)
+            else:
+                # Multimodal content — show text parts only
+                for part in content:
+                    if part.get("type") == "text":
+                        st.markdown(part["text"])
+
+    # ── Chat input (pre-filled from voice if available) ─────────────
+    prefill    = st.session_state.pop("voice_prefill", "")
+    user_input = st.chat_input(prefill or "Type your message...")
+    if not user_input and prefill:
+        user_input = prefill   # use voice text if user didn't type anything
+
+    if user_input:
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        with st.chat_message("user"):
+            st.markdown(user_input)
+
+        # Build system prompt — inject PDF content if a PDF is attached
+        system = f"You are Aura, a helpful and friendly AI assistant. {lang_rule}"
+        if st.session_state.get("pdf_context"):
+            system += (
+                f"\n\nThe user has attached a PDF. Use it to answer their questions:\n\n"
+                f"---\n{st.session_state.pdf_context}\n---\n"
+                f"If the answer is not in the PDF, say so."
+            )
+
+        full_messages = [{"role": "system", "content": system}] + [
+            {"role": m["role"], "content": m["content"]}
+            for m in st.session_state.messages
+        ]
+
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                reply = call_groq(full_messages, model_id, temperature, max_tokens)
+                st.markdown(reply)
+
+        st.session_state.messages.append({"role": "assistant", "content": reply})
 
 
-# ─────────────────────────────────────────
-# FEATURE 2 — IMAGE GENERATOR
-# ─────────────────────────────────────────
+# ── FEATURE 2: IMAGE GENERATOR (Hugging Face) ─────────────────────────────────
 
 elif "Image Generator" in feature:
     st.header("🎨 Image Generator")
-    st.caption("Powered by Pollinations AI — completely free, no API key needed")
+    st.caption("Powered by Hugging Face — needs HF_TOKEN in secrets")
 
     prompt = st.text_area("Describe your image", placeholder="A sunset over Mumbai skyline, golden hour...")
 
-    col1, col2, col3 = st.columns(3)
-    style  = col1.selectbox("Style",  list(IMAGE_STYLES.keys()))
-    width  = col2.slider("Width",  256, 1024, 512, step=64)
-    height = col3.slider("Height", 256, 1024, 512, step=64)
+    col1, col2 = st.columns(2)
+    style     = col1.selectbox("Style", list(IMAGE_STYLES.keys()))
+    hf_model  = col2.selectbox("Model", list(HF_IMAGE_MODELS.keys()))
 
     if st.button("✨ Generate Image", use_container_width=True):
         if not prompt.strip():
             st.warning("Please enter a prompt first.")
         else:
-            with st.spinner("Generating your image..."):
-                full_prompt = prompt + IMAGE_STYLES[style]
-                encoded_prompt = urllib.parse.quote(full_prompt)
-                url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={width}&height={height}&nologo=true"
-
-                try:
-                    response = requests.get(url, timeout=60)
-                    response.raise_for_status()
-                    image = Image.open(BytesIO(response.content))
+            with st.spinner("Generating... (may take 20–40 seconds on first run)"):
+                image = generate_image_hf(prompt + IMAGE_STYLES[style], HF_IMAGE_MODELS[hf_model])
+                if image:
                     st.image(image, use_container_width=True)
-
-                    # Let user download the image
                     buf = BytesIO()
                     image.save(buf, format="PNG")
                     st.download_button("⬇ Download Image", buf.getvalue(),
                                        file_name="aura_image.png", mime="image/png",
                                        use_container_width=True)
-                except Exception as e:
-                    st.error(f"Failed to generate image: {e}")
 
 
-# ─────────────────────────────────────────
-# FEATURE 3 — IMAGE ANALYZER
-# ─────────────────────────────────────────
+# ── FEATURE 3: IMAGE ANALYZER (HF BLIP + Groq) ────────────────────────────────
 
 elif "Image Analyzer" in feature:
     st.header("🖼 Image Analyzer")
-    st.caption("Upload any image and ask questions about it")
+    st.caption("Uses Hugging Face BLIP to read the image, then Groq to answer your question")
 
     uploaded = st.file_uploader("Upload an image", type=["png", "jpg", "jpeg", "webp"])
 
@@ -256,14 +360,13 @@ elif "Image Analyzer" in feature:
         image = Image.open(uploaded)
         st.image(image, use_container_width=True)
 
-        # Quick-action buttons fill the question field automatically
         st.markdown("**Quick actions:**")
         c1, c2, c3, c4 = st.columns(4)
         question = ""
         if c1.button("📝 Describe"):  question = "Describe this image in detail."
-        if c2.button("🎨 Colors"):    question = "What are the main colors in this image?"
-        if c3.button("😊 Mood"):      question = "What is the mood or emotion of this image?"
-        if c4.button("📦 Objects"):   question = "List all objects you can identify in this image."
+        if c2.button("🎨 Colors"):    question = "What are the main colors?"
+        if c3.button("😊 Mood"):      question = "What is the mood or emotion?"
+        if c4.button("📦 Objects"):   question = "List all objects in the image."
 
         question = st.text_input("Or type your own question:", value=question,
                                  placeholder="What is happening in this image?")
@@ -272,63 +375,24 @@ elif "Image Analyzer" in feature:
             if not question:
                 st.warning("Please enter a question.")
             else:
-                with st.spinner("Analyzing..."):
+                with st.spinner("Step 1 — Reading image with BLIP vision model..."):
+                    caption = analyze_image_hf(image)   # real image understanding
+
+                with st.spinner("Step 2 — Generating detailed answer..."):
                     messages = [
-                        {"role": "system", "content": "You are an expert image analyst. Be detailed and helpful."},
-                        {"role": "user",   "content": f"I have uploaded an image. {question}"},
+                        {"role": "system", "content": "You are an expert image analyst. A vision model has described the image. Use that description to answer the user's question thoroughly."},
+                        {"role": "user",   "content": f"Vision model description: '{caption}'\n\nUser question: {question}"},
                     ]
                     reply = call_groq(messages, "llama-3.3-70b-versatile", 0.3, 1000)
                     st.success(reply)
+                    st.caption(f"🤖 Raw vision caption: {caption}")
 
 
-# ─────────────────────────────────────────
-# FEATURE 4 — PDF CHAT
-# ─────────────────────────────────────────
-
-elif "PDF" in feature:
-    st.header("📄 PDF Chat")
-    st.caption("Upload a PDF and ask questions about its content")
-
-    uploaded_pdf = st.file_uploader("Upload a PDF", type=["pdf"])
-
-    if not uploaded_pdf:
-        # Clear old PDF data when no file is uploaded
-        st.session_state.pop("pdf_text", None)
-        st.session_state.pop("messages", None)
-        st.info("Upload a PDF to start chatting with it.")
-    else:
-        # Read the PDF only once and store the text
-        if "pdf_text" not in st.session_state:
-            with st.spinner("Reading PDF..."):
-                try:
-                    reader = PyPDF2.PdfReader(io.BytesIO(uploaded_pdf.read()))
-                    text = "".join(page.extract_text() for page in reader.pages)
-                    st.session_state.pdf_text = text[:8000]   # limit to 8000 chars
-                    st.success(f"✅ Loaded {len(reader.pages)} pages.")
-                except Exception as e:
-                    st.error(f"Could not read PDF: {e}")
-
-        if "pdf_text" in st.session_state:
-            st.caption(f"📄 {len(st.session_state.pdf_text)} characters loaded")
-
-            system_prompt = f"""You are a helpful assistant. Answer questions based ONLY on this document:
-
----
-{st.session_state.pdf_text}
----
-
-If the answer is not in the document, say so. {lang_rule}"""
-
-            show_chat(system_prompt, model_id, temperature, max_tokens)
-
-
-# ─────────────────────────────────────────
-# FEATURE 5 — WEATHER
-# ─────────────────────────────────────────
+# ── FEATURE 4: WEATHER ─────────────────────────────────────────────────────────
 
 elif "Weather" in feature:
     st.header("🌤 Weather")
-    st.caption("Real-time weather for any city — no API key needed")
+    st.caption("Real-time weather — no API key needed")
 
     col1, col2 = st.columns([3, 1])
     city = col1.text_input("Enter a city name", placeholder="Nagpur, Mumbai, Delhi...")
@@ -341,70 +405,72 @@ elif "Weather" in feature:
             with st.spinner("Fetching weather..."):
                 try:
                     # Step 1: Get coordinates for the city
-                    geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={urllib.parse.quote(city)}&count=1"
-                    geo_data = requests.get(geo_url, timeout=10).json()
+                    geo_data = requests.get(
+                        f"https://geocoding-api.open-meteo.com/v1/search?name={urllib.parse.quote(city)}&count=1",
+                        timeout=10,
+                    ).json()
 
-                    if "results" not in geo_data:
+                    if not geo_data.get("results"):
                         st.error("City not found. Try a different spelling.")
                     else:
-                        loc = geo_data["results"][0]
+                        loc        = geo_data["results"][0]
                         lat, lon   = loc["latitude"], loc["longitude"]
                         city_name  = loc.get("name", city)
                         country    = loc.get("country", "")
                         unit_param = "celsius" if unit == "Celsius" else "fahrenheit"
                         unit_sym   = "°C" if unit == "Celsius" else "°F"
 
-                        # Step 2: Get current weather using coordinates
-                        weather_url = (
+                        # Step 2: Fetch weather — use 'current_weather' (not 'current')
+                        # Also fetch hourly humidity and feels-like for the current hour
+                        w_data = requests.get(
                             f"https://api.open-meteo.com/v1/forecast?"
                             f"latitude={lat}&longitude={lon}"
-                            f"&current=temperature_2m,relative_humidity_2m,"
-                            f"wind_speed_10m,weather_code,apparent_temperature"
-                            f"&temperature_unit={unit_param}"
-                        )
-                        weather_data = requests.get(weather_url, timeout=10).json()
-                        curr = weather_data["current"]
+                            f"&current_weather=true"
+                            f"&hourly=relativehumidity_2m,apparent_temperature"
+                            f"&temperature_unit={unit_param}&forecast_days=1",
+                            timeout=10,
+                        ).json()
 
-                        temp     = curr["temperature_2m"]
-                        feels    = curr["apparent_temperature"]
-                        humidity = curr["relative_humidity_2m"]
-                        wind     = curr["wind_speed_10m"]
-                        code     = curr["weather_code"]
+                        # 'current_weather' is the top-level key returned by this API
+                        cw       = w_data.get("current_weather", {})
+                        temp     = cw.get("temperature", "N/A")
+                        wind     = cw.get("windspeed", "N/A")
+                        wmo_code = cw.get("weathercode", 0)
 
-                        # Map weather code to a human-readable description
+                        # Hourly arrays — index 0 is the first hour of today
+                        hourly   = w_data.get("hourly", {})
+                        humidity = hourly.get("relativehumidity_2m", ["N/A"])[0]
+                        feels    = hourly.get("apparent_temperature",  ["N/A"])[0]
+
+                        # WMO weather code → emoji label
                         code_map = {
-                            0: "☀️ Clear sky",    1: "🌤 Mainly clear",  2: "⛅ Partly cloudy",
-                            3: "☁️ Overcast",     45: "🌫 Foggy",        48: "🌫 Icy fog",
-                            51: "🌦 Light drizzle", 61: "🌧 Light rain", 63: "🌧 Moderate rain",
-                            65: "🌧 Heavy rain",  71: "🌨 Light snow",   80: "🌦 Rain showers",
+                            0: "☀️ Clear sky",      1: "🌤 Mainly clear",   2: "⛅ Partly cloudy",
+                            3: "☁️ Overcast",       45: "🌫 Foggy",         48: "🌫 Icy fog",
+                            51: "🌦 Light drizzle", 61: "🌧 Light rain",    63: "🌧 Moderate rain",
+                            65: "🌧 Heavy rain",    71: "🌨 Light snow",    80: "🌦 Rain showers",
                             95: "⛈ Thunderstorm",
                         }
-                        condition = code_map.get(code, "🌡 Unknown")
+                        condition = code_map.get(wmo_code, "🌡 Unknown")
 
-                        # Show the weather metrics
                         st.subheader(f"{city_name}, {country}")
                         m1, m2, m3, m4 = st.columns(4)
-                        m1.metric("Temperature",  f"{temp}{unit_sym}", f"Feels {feels}{unit_sym}")
-                        m2.metric("Humidity",     f"{humidity}%")
-                        m3.metric("Wind Speed",   f"{wind} km/h")
-                        m4.metric("Condition",    condition)
+                        m1.metric("Temperature", f"{temp}{unit_sym}", f"Feels {feels}{unit_sym}")
+                        m2.metric("Humidity",    f"{humidity}%")
+                        m3.metric("Wind Speed",  f"{wind} km/h")
+                        m4.metric("Condition",   condition)
 
-                        # Step 3: Get a short AI tip based on the weather
                         with st.spinner("Getting AI tip..."):
-                            tip_messages = [
-                                {"role": "system", "content": "You are a helpful weather assistant. Give a practical 2-line tip."},
+                            tip = call_groq([
+                                {"role": "system", "content": "Helpful weather assistant. Give a practical 2-line tip."},
                                 {"role": "user",   "content": f"Weather in {city_name}: {temp}{unit_sym}, {condition}, humidity {humidity}%. What should I wear or do?"},
-                            ]
-                            tip = call_groq(tip_messages, "llama-3.1-8b-instant", 0.7, 200)
+                            ], "llama-3.1-8b-instant", 0.7, 200)
                             st.info(f"💡 AI Tip: {tip}")
 
                 except Exception as e:
                     st.error(f"Something went wrong: {e}")
 
 
-# ─────────────────────────────────────────
-# FEATURE 6 — CODE ASSISTANT
-# ─────────────────────────────────────────
+# ── FEATURE 5: CODE ASSISTANT ──────────────────────────────────────────────────
 
 elif "Code" in feature:
     st.header("💻 Code Assistant")
@@ -420,34 +486,29 @@ elif "Code" in feature:
     ])
 
     col1, col2 = st.columns(2)
-    lang = col1.selectbox("Language", ["Python", "JavaScript", "Java", "C++", "SQL", "HTML/CSS", "React", "Other"])
+    lang        = col1.selectbox("Language", ["Python", "JavaScript", "Java", "C++", "SQL", "HTML/CSS", "React", "Other"])
     target_lang = col2.selectbox("Convert TO", ["Python", "JavaScript", "Java", "C++", "SQL", "HTML/CSS", "React", "Other"]) if "Convert" in action else None
 
     user_code = st.text_area("Describe what you want or paste your code here", height=200,
-                             placeholder="e.g. Write a function to check if a number is prime in Python")
+                             placeholder="e.g. Write a function to check if a number is prime")
 
     if st.button("🚀 Run", use_container_width=True):
         if not user_code.strip():
             st.warning("Please enter some code or a description.")
         else:
             with st.spinner("Processing..."):
-
-                # Build the right prompt depending on what the user wants
                 prompts = {
-                    "✍️ Write code for me":          f"Write clean, well-commented {lang} code for: {user_code}. Include example usage.",
-                    "🐛 Debug my code":              f"Debug this {lang} code and explain all issues found:\n\n{user_code}",
-                    "📖 Explain this code":          f"Explain this {lang} code step by step in simple terms:\n\n{user_code}",
-                    "🔄 Convert to another language": f"Convert this {lang} code to {target_lang}:\n\n{user_code}",
-                    "⚡ Optimize my code":           f"Optimize this {lang} code for better performance:\n\n{user_code}",
-                    "🧪 Write tests for my code":    f"Write comprehensive unit tests for this {lang} code:\n\n{user_code}",
+                    "✍️ Write code for me":           f"Write clean, well-commented {lang} code for: {user_code}. Include example usage.",
+                    "🐛 Debug my code":               f"Debug this {lang} code and explain all issues:\n\n{user_code}",
+                    "📖 Explain this code":           f"Explain this {lang} code step by step in simple terms:\n\n{user_code}",
+                    "🔄 Convert to another language":  f"Convert this {lang} code to {target_lang}:\n\n{user_code}",
+                    "⚡ Optimize my code":            f"Optimize this {lang} code for better performance:\n\n{user_code}",
+                    "🧪 Write tests for my code":     f"Write comprehensive unit tests for this {lang} code:\n\n{user_code}",
                 }
-
                 messages = [
                     {"role": "system", "content": "You are an expert programmer. Provide clean, working code with clear explanations. Use markdown code blocks."},
                     {"role": "user",   "content": prompts[action]},
                 ]
                 reply = call_groq(messages, model_id, temperature=0.3, max_tokens=max_tokens)
                 st.markdown(reply)
-
-                st.download_button("📥 Download", reply,
-                                   file_name="aura_code.txt", mime="text/plain")
+                st.download_button("📥 Download", reply, file_name="aura_code.txt", mime="text/plain")
