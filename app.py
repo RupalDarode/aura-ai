@@ -1,107 +1,100 @@
-    "Flan-T5 XL": "google/flan-t5-xl",
-}
+# ============================================================
+#  Aura AI  —  Final Fixed Version
+#  Built by Rupal Darode
+# ============================================================
+#
+#  SETUP: Streamlit Cloud → Settings → Secrets → paste:
+#
+#     GROQ_API_KEY = "gsk_xxxxxxxxxxxxxxxxxxxx"
+#
+#  Get FREE key: https://console.groq.com/keys
+#  No other tokens needed.
+# ============================================================
 
-HF_STT_MODELS = {
-    "Whisper Small": "openai/whisper-small",
-    "Whisper Base": "openai/whisper-base",
-}
+import base64
+import io
+import base64
+import urllib.parse
+import os
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-HF_IMAGE_MODELS = {
-    "BLIP Caption": "Salesforce/blip-image-captioning-large",
-    "ViT Image Classification": "google/vit-base-patch16-224",
-}
+import PyPDF2
+import requests
+import streamlit as st
+import streamlit.components.v1 as components
+from PIL import Image
+from io import BytesIO
 
-HF_IMAGE_GEN_MODELS = {
-    "Stable Diffusion XL": "stabilityai/stable-diffusion-xl-base-1.0",
-    "Stable Diffusion 2": "stabilityai/stable-diffusion-2-1",
-}
+# ── PAGE CONFIG ─────────────────────────────────────────────
+st.set_page_config(page_title="Aura AI", page_icon="✨", layout="wide")
+try:
+    import PyPDF2
+except ImportError:
+    PyPDF2 = None
 
-LANGUAGES = {
-    "English": "Reply in English.",
-    "Hindi": "Reply in Hindi.",
-    "Hinglish": "Reply in Hinglish, mixing Hindi and English naturally.",
-    "Marathi": "Reply in Marathi.",
-}
-
-WEATHER_CODES = {
-    0: "Clear sky",
-    1: "Mainly clear",
-    2: "Partly cloudy",
-    3: "Overcast",
-    45: "Fog",
-    48: "Depositing rime fog",
-    51: "Light drizzle",
-    53: "Moderate drizzle",
-    55: "Dense drizzle",
-    61: "Slight rain",
-    63: "Moderate rain",
-    65: "Heavy rain",
-    71: "Slight snow",
-    73: "Moderate snow",
-    75: "Heavy snow",
-    80: "Slight rain showers",
-    81: "Moderate rain showers",
-    82: "Violent rain showers",
-    95: "Thunderstorm",
-    96: "Thunderstorm with slight hail",
-    99: "Thunderstorm with heavy hail",
-}
+try:
+    import docx
+except ImportError:
+    docx = None
 
 
-def get_hf_token() -> str:
-    token = st.secrets.get("HF_TOKEN", "") if hasattr(st, "secrets") else ""
-    return token or os.environ.get("HF_TOKEN", "")
+# ============================================================
+# Aura AI - Streamlit + Hugging Face
+# Features:
+# 1. Conversational chatbot
+# 2. Voice to text and text to voice in the same chatbot
+# 3. Document upload
+# 4. PDF analyzer
+# 5. Image analyzer
+# 6. Image generation
+# 7. Weather forecasting
+#
+# Streamlit secrets:
+# HF_TOKEN = "hf_xxxxxxxxxxxxxxxxx"
+# ============================================================
 
 
-def hf_headers(content_type: str | None = "application/json") -> dict:
-    token = get_hf_token()
-    headers = {}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    if content_type:
-        headers["Content-Type"] = content_type
-    return headers
+st.set_page_config(page_title="Aura AI", page_icon="AI", layout="wide")
+
+st.markdown(
+    """
+    <style>
+      .stApp { background: #f8fafc; }
+      section[data-testid="stSidebar"] {
+        background: #ffffff;
+        border-right: 1px solid #e5e7eb;
+      }
+      .stChatMessage {
+        background: #ffffff !important;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+      }
+      .small-note {
+        color: #64748b;
+        font-size: 0.9rem;
+      }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 
-def hf_api_url(model_id: str) -> str:
-    return f"https://api-inference.huggingface.co/models/{model_id}"
-
-
-def parse_hf_error(response: requests.Response) -> str:
-    try:
-        data = response.json()
-    except Exception:
-        return response.text[:500] or "Unknown Hugging Face error."
-
-    if isinstance(data, dict):
-        message = data.get("error") or data.get("message") or str(data)
-        estimated = data.get("estimated_time")
-        if estimated:
-            return f"{message} Try again in about {round(float(estimated))} seconds."
-        return str(message)
-    return str(data)
-
-
-def call_hf_json(model_id: str, payload: dict, timeout: int = 90):
-    response = requests.post(
-        hf_api_url(model_id),
-        headers=hf_headers(),
-        json=payload,
-        timeout=timeout,
-    )
-    if response.status_code >= 400:
-        raise RuntimeError(parse_hf_error(response))
-    return response.json()
-
-
-def call_hf_binary(model_id: str, payload: dict, timeout: int = 120) -> bytes:
-    response = requests.post(
-        hf_api_url(model_id),
-        headers=hf_headers(),
-        json=payload,
-        timeout=timeout,
-    )
-    if response.status_code >= 400:
-        raise RuntimeError(parse_hf_error(response))
-    return response.content
-
+st.markdown("""
+<style>
+  .stApp { background-color: #f9fafb; }
+  section[data-testid="stSidebar"] {
+    background-color: #ffffff;
+    border-right: 1px solid #e5e7eb;
+  }
+  .stChatMessage {
+    background-color: #ffffff !important;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+  }
+</style>
+""", unsafe_allow_html=True)
+HF_CHAT_MODELS = {
+    "Zephyr 7B Beta - chat": "HuggingFaceH4/zephyr-7b-beta",
+    "Mistral 7B Instruct - balanced": "mistralai/Mistral-7B-Instruct-v0.2",
+    "Llama 3.1 8B Instruct - strong": "meta-llama/Llama-3.1-8B-Instruct",
