@@ -416,78 +416,140 @@ window.addEventListener('message', (e) => {
 
 elif "Image Generator" in feature:
     st.header("🎨 Image Generator")
-    st.caption("Powered by Together AI via Groq key — uses your GROQ_API_KEY")
+    st.caption("Powered by Pollinations AI — free, no API key needed, runs in your browser")
 
-    prompt = st.text_area("Describe your image",
-                          placeholder="A sunset over Mumbai skyline, golden hour...")
+    prompt = st.text_input("Describe your image",
+                           placeholder="A sunset over Mumbai skyline, golden hour...")
 
     col1, col2 = st.columns(2)
     style = col1.selectbox("Style", list(IMAGE_STYLES.keys()))
-    size  = col2.selectbox("Size", ["Square (1024×1024)", "Portrait (768×1024)", "Landscape (1024×768)"])
+    size  = col2.selectbox("Size", ["Square (768×768)", "Portrait (512×768)", "Landscape (768×512)"])
 
     size_map = {
-        "Square (1024×1024)":   "1024x1024",
-        "Portrait (768×1024)":  "768x1024",
-        "Landscape (1024×768)": "1024x768",
+        "Square (768×768)":    (768, 768),
+        "Portrait (512×768)":  (512, 768),
+        "Landscape (768×512)": (768, 512),
     }
-    img_size = size_map[size]
+    w, h = size_map[size]
+    style_suffix = IMAGE_STYLES[style]
 
-    if st.button("✨ Generate Image", use_container_width=True):
-        if not prompt.strip():
-            st.warning("Please enter a prompt first.")
-        else:
-            with st.spinner("Generating your image… (10–20 seconds)"):
-                full_prompt = prompt + IMAGE_STYLES[style]
-                try:
-                    api_key = st.secrets["GROQ_API_KEY"]
-                except Exception:
-                    st.error("❌ GROQ_API_KEY missing in Streamlit Secrets.")
-                    st.stop()
+    # Build the full prompt including style
+    full_prompt = (prompt + style_suffix).strip() if prompt.strip() else ""
 
-                try:
-                    # Together AI image generation — works with a Together API key
-                    # Uses Black Forest Labs FLUX.1 schnell model (free tier available)
-                    res = requests.post(
-                        "https://api.together.xyz/v1/images/generations",
-                        headers={
-                            "Authorization": f"Bearer {st.secrets.get('TOGETHER_API_KEY', '')}",
-                            "Content-Type": "application/json",
-                        },
-                        json={
-                            "model": "black-forest-labs/FLUX.1-schnell-Free",
-                            "prompt": full_prompt,
-                            "width":  int(img_size.split("x")[0]),
-                            "height": int(img_size.split("x")[1]),
-                            "steps": 4,
-                            "n": 1,
-                        },
-                        timeout=60,
-                    )
-                    data = res.json()
+    # NOTE: Streamlit Cloud's server blocks all image API calls (HF, Pollinations, etc.)
+    # Solution: run the fetch() entirely in the BROWSER using st.components.v1.html
+    # The browser has no network restrictions — Pollinations works perfectly from JS.
+    # The image is fetched and displayed inside the HTML component itself.
 
-                    if res.status_code == 200 and "data" in data:
-                        # Response contains base64 image
-                        img_b64 = data["data"][0].get("b64_json") or data["data"][0].get("url")
-                        if img_b64 and not img_b64.startswith("http"):
-                            img_bytes = base64.b64decode(img_b64)
-                            image = Image.open(BytesIO(img_bytes))
-                        else:
-                            # URL returned instead of base64
-                            img_res = requests.get(img_b64, timeout=30)
-                            image = Image.open(BytesIO(img_res.content))
+    import json
+    encoded_prompt = urllib.parse.quote(full_prompt) if full_prompt else ""
 
-                        st.image(image, use_container_width=True)
-                        buf = BytesIO()
-                        image.save(buf, format="PNG")
-                        st.download_button("⬇ Download Image", buf.getvalue(),
-                                           file_name="aura_image.png", mime="image/png",
-                                           use_container_width=True)
-                    else:
-                        err = data.get("error", {}).get("message", str(data))
-                        st.error(f"❌ Together AI error: {err}")
-                        st.info("💡 Add your free Together AI key as TOGETHER_API_KEY in Streamlit Secrets. Get it free at: https://api.together.ai")
-                except Exception as e:
-                    st.error(f"❌ Error: {e}")
+    components.html(f"""
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body {{
+    margin: 0; padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    background: transparent;
+  }}
+  #container {{
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
+    padding: 8px 0;
+  }}
+  #generate-btn {{
+    padding: 10px 32px;
+    background: #2563eb; color: white;
+    border: none; border-radius: 8px;
+    font-size: 15px; cursor: pointer;
+    transition: background 0.2s;
+    width: 100%;
+  }}
+  #generate-btn:hover {{ background: #1d4ed8; }}
+  #generate-btn:disabled {{ background: #93c5fd; cursor: not-allowed; }}
+  #status {{ font-size: 13px; color: #6b7280; min-height: 20px; }}
+  #img-box img {{
+    max-width: 100%; border-radius: 10px;
+    border: 1px solid #e5e7eb;
+    display: none;
+  }}
+  #download-btn {{
+    display: none;
+    padding: 8px 24px;
+    background: #f9fafb; color: #111827;
+    border: 1px solid #e5e7eb; border-radius: 8px;
+    font-size: 13px; cursor: pointer; text-decoration: none;
+  }}
+  #download-btn:hover {{ background: #f3f4f6; }}
+  #error {{ color: #dc2626; font-size: 13px; display: none; }}
+</style>
+</head>
+<body>
+<div id="container">
+  <button id="generate-btn" onclick="generateImage()"
+    {"" if full_prompt else "disabled"}>
+    ✨ Generate Image
+  </button>
+  <div id="status">{("Ready — click Generate!" if full_prompt else "Enter a prompt above first, then click Generate.")}</div>
+  <div id="error"></div>
+  <div id="img-box"><img id="result-img" /></div>
+  <a id="download-btn" download="aura_image.png">⬇ Download Image</a>
+</div>
+
+<script>
+const PROMPT = {json.dumps(encoded_prompt)};
+const W = {w};
+const H = {h};
+
+function generateImage() {{
+  if (!PROMPT) {{ return; }}
+
+  const btn    = document.getElementById('generate-btn');
+  const status = document.getElementById('status');
+  const errEl  = document.getElementById('error');
+  const img    = document.getElementById('result-img');
+  const dlBtn  = document.getElementById('download-btn');
+
+  btn.disabled    = true;
+  btn.textContent = '⏳ Generating…';
+  status.textContent = 'Fetching from Pollinations AI… (~15 seconds)';
+  errEl.style.display = 'none';
+  img.style.display   = 'none';
+  dlBtn.style.display = 'none';
+
+  // Use a cache-busting seed so each click gives a fresh image
+  const seed = Math.floor(Math.random() * 99999);
+  const url  = `https://image.pollinations.ai/prompt/${{PROMPT}}?width=${{W}}&height=${{H}}&seed=${{seed}}&nologo=true`;
+
+  // Fetch as blob — browser has no restrictions, works perfectly
+  fetch(url)
+    .then(res => {{
+      if (!res.ok) throw new Error(`Status ${{res.status}}`);
+      return res.blob();
+    }})
+    .then(blob => {{
+      const objectUrl = URL.createObjectURL(blob);
+      img.src = objectUrl;
+      img.style.display = 'block';
+      dlBtn.href = objectUrl;
+      dlBtn.style.display = 'inline-block';
+      status.textContent = '✅ Done!';
+      btn.textContent = '✨ Generate Again';
+      btn.disabled = false;
+    }})
+    .catch(err => {{
+      errEl.textContent = '❌ Error: ' + err.message + '. Try again.';
+      errEl.style.display = 'block';
+      status.textContent = '';
+      btn.textContent = '✨ Generate Image';
+      btn.disabled = false;
+    }});
+}}
+</script>
+</body>
+</html>
+""", height=520 if full_prompt else 120)
 
 
 # ─────────────────────────────────────────
