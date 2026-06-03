@@ -141,6 +141,28 @@ def hf_headers() -> Dict[str, str]:
     return headers
 
 
+def get_hf_api_bases() -> List[str]:
+    custom_base = ""
+    try:
+        custom_base = st.secrets.get("HF_API_BASE", "")
+    except Exception:
+        custom_base = ""
+    custom_base = custom_base or os.getenv("HF_API_BASE", "")
+
+    bases = []
+    if custom_base:
+        bases.append(custom_base.rstrip("/"))
+
+    # New Hugging Face serverless inference route, then legacy route as fallback.
+    bases.extend(
+        [
+            "https://router.huggingface.co/hf-inference/models",
+            "https://api-inference.huggingface.co/models",
+        ]
+    )
+    return list(dict.fromkeys(bases))
+
+
 def call_hf_api(
     model: str,
     payload: Any,
@@ -153,28 +175,48 @@ def call_hf_api(
     headers = hf_headers()
     if content_type:
         headers["Content-Type"] = content_type
-    url = f"https://api-inference.huggingface.co/models/{model}"
-    response = requests.post(url, headers=headers, json=None if binary else payload, data=payload if binary else None, timeout=timeout)
+    last_error = None
 
-    if response.status_code == 503:
+    for base in get_hf_api_bases():
+        url = f"{base}/{model}"
         try:
-            message = response.json().get("error", "Model is loading. Try again in a minute.")
-        except Exception:
-            message = "Model is loading. Try again in a minute."
-        raise RuntimeError(message)
+            response = requests.post(
+                url,
+                headers=headers,
+                json=None if binary else payload,
+                data=payload if binary else None,
+                timeout=timeout,
+            )
 
-    if not response.ok:
-        try:
-            error_text = response.json().get("error", response.text)
-        except Exception:
-            error_text = response.text
-        raise RuntimeError(f"{task} failed: {error_text}")
+            if response.status_code == 503:
+                try:
+                    message = response.json().get("error", "Model is loading. Try again in a minute.")
+                except Exception:
+                    message = "Model is loading. Try again in a minute."
+                raise RuntimeError(message)
 
-    if response.headers.get("content-type", "").startswith("image/"):
-        return response.content
-    if response.headers.get("content-type", "").startswith("audio/"):
-        return response.content
-    return response.json()
+            if not response.ok:
+                try:
+                    error_text = response.json().get("error", response.text)
+                except Exception:
+                    error_text = response.text
+                raise RuntimeError(f"{task} failed from {base}: {error_text}")
+
+            content_type_header = response.headers.get("content-type", "")
+            if content_type_header.startswith("image/"):
+                return response.content
+            if content_type_header.startswith("audio/"):
+                return response.content
+            return response.json()
+        except (requests.exceptions.RequestException, RuntimeError) as exc:
+            last_error = exc
+            continue
+
+    raise RuntimeError(
+        "Could not reach Hugging Face from this Streamlit server. "
+        "Check internet access, DNS, and Streamlit Cloud outbound network settings. "
+        f"Last error: {last_error}"
+    )
 
 
 def build_chat_prompt(messages: List[Dict[str, str]], system_prompt: str) -> str:
@@ -328,6 +370,15 @@ def generate_image(prompt: str, model: str) -> bytes:
     )
 
 
+def pollinations_image_url(prompt: str) -> str:
+    import random
+    import urllib.parse
+
+    encoded_prompt = urllib.parse.quote(prompt)
+    seed = random.randint(1, 999999)
+    return f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=768&height=768&nologo=true&seed={seed}"
+
+
 def get_weather(city: str, unit: str) -> Dict[str, Any]:
     geo_url = "https://geocoding-api.open-meteo.com/v1/search"
     geo = requests.get(
@@ -347,6 +398,7 @@ def get_weather(city: str, unit: str) -> Dict[str, Any]:
             "latitude": location["latitude"],
             "longitude": location["longitude"],
             "current": "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m",
+            "current_weather": "true",
             "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max",
             "temperature_unit": temperature_unit,
             "wind_speed_unit": "kmh",
@@ -356,7 +408,15 @@ def get_weather(city: str, unit: str) -> Dict[str, Any]:
         timeout=20,
     ).json()
 
-    current = weather.get("current", {})
+    current = weather.get("current") or {}
+    current_weather = weather.get("current_weather") or {}
+
+    if current_weather:
+        current.setdefault("temperature_2m", current_weather.get("temperature"))
+        current.setdefault("apparent_temperature", current_weather.get("temperature"))
+        current.setdefault("weather_code", current_weather.get("weathercode"))
+        current.setdefault("wind_speed_10m", current_weather.get("windspeed"))
+
     daily = weather.get("daily", {})
     return {
         "place": f"{location.get('name', city)}, {location.get('country', '')}",
@@ -467,7 +527,9 @@ if feature == "Conversational Chatbot":
                     if voice_text:
                         st.success(f"Voice text: {voice_text}")
                 except Exception as exc:
-                    st.error(str(exc))
+                    st.error("Voice-to-text could not reach Hugging Face from this Streamlit server.")
+                    with st.expander("Technical Hugging Face error"):
+                        st.code(str(exc))
 
     typed_text = st.chat_input("Type your message here...")
     user_text = typed_text or voice_text
@@ -495,7 +557,12 @@ if feature == "Conversational Chatbot":
                         max_tokens,
                     )
                 except Exception as exc:
-                    reply = f"Sorry, I could not get a Hugging Face response: {exc}"
+                    reply = (
+                        "Sorry, I could not reach Hugging Face from this Streamlit server. "
+                        "Please check your HF_TOKEN secret and Streamlit Cloud network/DNS access."
+                    )
+                    with st.expander("Technical Hugging Face error"):
+                        st.code(str(exc))
                 st.markdown(reply)
                 speak_text_browser(reply, language)
 
@@ -640,7 +707,21 @@ elif feature == "Image Generation":
                         mime="image/png",
                     )
                 except Exception as exc:
-                    st.error(str(exc))
+                    st.warning(
+                        "Hugging Face image generation could not be reached from the Streamlit server. "
+                        "Showing a browser-loaded fallback image instead."
+                    )
+                    st.markdown(
+                        f"""
+                        <div style="text-align:center">
+                          <img src="{pollinations_image_url(full_prompt)}"
+                               style="max-width:100%; border-radius:8px; border:1px solid #e5e7eb;" />
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    with st.expander("Technical Hugging Face error"):
+                        st.code(str(exc))
 
 
 elif feature == "Weather Forecasting":
